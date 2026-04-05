@@ -11,13 +11,13 @@ opencv-python
 perceptual==0.1
 pillow==8.4.0
 scipy
+scikit-learn
 tifffile==2020.9.3
 timm==0.3.2
 yapf==0.31.0
 # scikit-image==0.17.2
 matplotlib
 # Make faster-kan available when installing Seg_UKAN
--e ../faster-kan
 # pip install torch==1.13.0+cu116 torchvision==0.14.0+cu116 torchaudio==0.13.0 --extra-index-url https://download.pytorch.org/whl/cu116
 ultralytics
 typing-extensions==4.11.0

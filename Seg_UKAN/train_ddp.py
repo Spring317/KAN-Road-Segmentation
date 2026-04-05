@@ -27,6 +27,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.optim as optim
 import yaml
+import albumentations.augmentations as transforms
 
 # DDP imports
 import torch.distributed as dist
@@ -36,7 +37,6 @@ from torch.utils.data.distributed import DistributedSampler
 # Mixed precision
 from torch.cuda.amp import GradScaler, autocast
 
-from albumentations.augmentations import transforms
 from albumentations.augmentations import geometric
 from albumentations.core.composition import Compose, OneOf
 from sklearn.model_selection import train_test_split
