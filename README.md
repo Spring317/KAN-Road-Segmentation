@@ -30,7 +30,7 @@ Before setting up the project, ensure the host machine has:
   ```
 
 ## Citation
-
+'''
 @article{li2024ukan,
   title={U-KAN Makes Strong Backbone for Medical Image Segmentation and Generation},
   author={Li, Chenxin and Liu, Xinyu and Li, Wuyang and Wang, Cheng and Liu, Hengyu and Yuan, Yixuan},
