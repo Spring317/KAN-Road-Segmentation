@@ -15,12 +15,13 @@ Before setting up the project, ensure the host machine has:
 
 ## Installation
 
-   ```bash
+  ```bash
     git clone https://github.com/Spring317/KAN-Road-Segmentation.git
     cd KAN-Road-Segmentation
     chmod +x setup_env.sh
     ./setup_env.sh    
-    ```
+  ```
+    
 ## Start training:
   
    ```bash
