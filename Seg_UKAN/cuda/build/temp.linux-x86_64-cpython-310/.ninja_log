@@ -1,0 +1,3 @@
+# ninja log v7
+0	15986	1775371402512909800	/mnt/ssd-0/M2_internship/KAN-Road-Segmentation/Seg_UKAN/cuda/build/temp.linux-x86_64-cpython-310/cpp/faster.o	fdf1c24f47cfad56
+0	39221	1775371402513133000	/mnt/ssd-0/M2_internship/KAN-Road-Segmentation/Seg_UKAN/cuda/build/temp.linux-x86_64-cpython-310/cpp/faster_cuda.o	79a23adff5cffd08

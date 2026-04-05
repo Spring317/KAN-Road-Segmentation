@@ -18,6 +18,7 @@ import os
 from collections import OrderedDict
 from glob import glob
 import random
+import albumentations
 from typing_extensions import Optional
 import numpy as np
 
@@ -95,10 +96,10 @@ def parse_args():
     parser.add_argument("--arch", "-a", metavar="ARCH", default="UKAN")
     parser.add_argument("--deep_supervision", default=False, type=str2bool)
     parser.add_argument("--input_channels", default=3, type=int, help="input channels")
-    parser.add_argument("--num_classes", default=1, type=int, help="number of classes")
+    parser.add_argument("--num_classes", default=20, type=int, help="number of classes")
     parser.add_argument("--input_w", default=256, type=int, help="image width")
     parser.add_argument("--input_h", default=192, type=int, help="image height")
-    parser.add_argument("--input_list", type=list_type, default=[128, 160, 256])
+    parser.add_argument("--input_list", type=list_type, default=[64, 128, 256])
 
     # loss
     parser.add_argument(
@@ -413,14 +414,14 @@ def seed_torch(seed=1029, rank=0):
     torch.backends.cudnn.deterministic = False  # Disable for speed
 
 
-def load_model(model_name: str, config) -> nn.Module:
+def load_model(config) -> nn.Module:
     """Load several models for experiment
     ######################################
     Parameters:
         model_name (str): name of the model to load
         config (str | None): path to config file (optional, used for loading KAN/FasterKAN)"""
 
-    if model_name == "UKAN":
+    if config["model_name"] == "UKAN":
         model = archs.__dict__[config["arch"]](
             config["num_classes"],
             config["input_channels"],
@@ -431,7 +432,7 @@ def load_model(model_name: str, config) -> nn.Module:
 
         return model
 
-    elif model_name == "yolo":
+    elif config["model_name"] == "yolo":
         yolo11 = yolo_model("yolov11m-seg.pt")
         model = yolo11.load_model()
         return model
@@ -495,7 +496,7 @@ def main():
 
     # Create model
     # load args model_name into model:
-    model = load_model(model_name, config)
+    model = load_model(config)
     # Convert BatchNorm to SyncBatchNorm for DDP
     if distributed and config["sync_bn"]:
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -647,7 +648,7 @@ def main():
     train_transform = Compose(
         [
             RandomRotate90(),
-            geometric.transforms.Flip(),
+            albumentations.HorizontalFlip(),
             Resize(config["input_h"], config["input_w"]),
             transforms.Normalize(),
         ]
@@ -661,7 +662,7 @@ def main():
     )
 
     # BDD100K dataset paths
-    bdd100k_base = "/storage/student11/bdd100k_seg/bdd100k/seg"
+    bdd100k_base = "/mnt/ssd-0/M2_internship/bdd100k_seg/bdd100k/seg"
 
     # Get image IDs
     train_mask_paths = sorted(

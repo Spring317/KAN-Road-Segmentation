@@ -1,4 +1,4 @@
-from ultralytics import yolo
+from ultralytics import YOLO as yolo
 import torch.nn as nn
 
 
