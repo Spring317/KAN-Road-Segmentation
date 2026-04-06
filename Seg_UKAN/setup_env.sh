@@ -7,10 +7,12 @@ echo "Starting U-FasterKAN Environment Setup..."
 
 # 1. Create the conda environment from configs.yaml
 echo "Building conda environment from configs.yaml..."
-mamba env create -f configs.yaml -y || conda env create -f configs.yaml -y --solver=libmamba
+conda env create -f configs.yaml -y
+
 # 2. Source conda to allow activation inside the script
 echo "Activating environment 'ukan'..."
 # Adapt the path if your miniforge/anaconda is installed elsewhere
+source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate ukan
 
 # 3. Compile the custom CUDA kernels
@@ -25,3 +27,6 @@ python setup.py build_ext --inplace
 cd ..
 
 echo "Setup Complete"
+# echo "👉 To start training, run:"
+# echo "conda activate ukan"
+# echo "python train_ddp.py --name test-ukan --batch_size 8"

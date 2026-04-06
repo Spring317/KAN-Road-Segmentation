@@ -1,18 +1,22 @@
 import os
 from setuptools import find_packages, setup
 
-# 1. Set CUDA_HOME dynamically FIRST
+# 1. Grab the Conda environment path
 conda_prefix = os.environ.get("CONDA_PREFIX")
 if conda_prefix:
     os.environ["CUDA_HOME"] = conda_prefix
-    print(f"CUDA_HOME automatically set to: {os.environ['CUDA_HOME']}")
-else:
-    print(
-        "Warning: CONDA_PREFIX not found. Are you sure your conda environment is activated?"
-    )
+    print(f"CUDA_HOME environment variable set to: {os.environ['CUDA_HOME']}")
 
-# 2. NOW import PyTorch cpp_extension so it sees the variable we just set
+# 2. Import PyTorch tools
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+import torch.utils.cpp_extension
+
+# 3. NUCLEAR OPTION: Forcibly overwrite PyTorch's cached internal variable!
+if conda_prefix:
+    torch.utils.cpp_extension.CUDA_HOME = conda_prefix
+    print(
+        f"PyTorch internal CUDA_HOME forcibly overridden to: {torch.utils.cpp_extension.CUDA_HOME}"
+    )
 
 setup(
     name="FasterOps",

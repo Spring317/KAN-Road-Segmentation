@@ -5,10 +5,6 @@ channels:
   - conda-forge
 dependencies:
   - python=3.10
-  - pytorch
-  - torchvision
-  - torchaudio
-  - pytorch-cuda=12.1  # Matches standard modern server setups
   - cuda-toolkit
   - cuda-nvcc
   - ninja
