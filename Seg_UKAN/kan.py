@@ -16,16 +16,39 @@ except ImportError:
 class RSWAFFunction(Function):
     @staticmethod
     def forward(ctx, input, grid, inv_denominator, train_grid, train_inv_denominator):
-        res, th = faster_ops.forward(input, grid, inv_denominator)
+        if input.is_cuda:
+            res, th = faster_ops.forward(input, grid, inv_denominator)
+        else:
+            batchsize, in_feats = input.shape
+            gridsize = grid.shape[0]
+            
+            grid_expanded = grid.view(gridsize, 1, 1).to(input.device)
+            input_expanded = input.view(1, batchsize, in_feats)
+            
+            z = torch.tanh((input_expanded - grid_expanded) * inv_denominator)
+            r = 1.0 - z * z
+            
+            res = r.permute(1, 0, 2).reshape(batchsize, -1)
+            th = z.permute(1, 0, 2).reshape(batchsize, -1)
+
         ctx.save_for_backward(input, grid, inv_denominator, th)
         return res
 
     @staticmethod
     def backward(ctx, grad_output):
         input, grid, inv_denominator, th = ctx.saved_tensors
-        grad_input = faster_ops.backward(
-            grad_output.contiguous(), th.contiguous(), input, grid, inv_denominator
-        )
+        if input.is_cuda:
+            grad_input = faster_ops.backward(
+                grad_output.contiguous(), th.contiguous(), input, grid, inv_denominator
+            )
+        else:
+            batchsize, in_feats = input.shape
+            gridsize = grid.shape[0]
+            
+            gx = -2.0 * th * (1.0 - th * th) * grad_output
+            gx = gx.view(batchsize, gridsize, in_feats)
+            grad_input = gx.sum(dim=1)
+            
         return grad_input, None, None, None, None
 
 

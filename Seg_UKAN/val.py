@@ -13,8 +13,10 @@ import yaml
 from albumentations.augmentations import transforms
 from albumentations.core.composition import Compose
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import average_precision_score
 from tqdm import tqdm
 from collections import OrderedDict
+from ultralytics import YOLO
 
 import archs
 
@@ -32,6 +34,8 @@ def parse_args():
     parser.add_argument('--name', default='bdd100k_UKAN', help='model name')
     parser.add_argument('--output_dir', default='outputs', help='ouput dir')
     parser.add_argument('--num_vis', default=10, type=int, help='number of images to visualize')
+    parser.add_argument('--yolo_exp', default=None, help='YOLO experiment name (e.g., yolo_exp2, yolo_exp3, yolo_exp4). If provided, validates this YOLO model.')
+    parser.add_argument('--cpu', action='store_true', help='Use CPU for evaluation')
             
     args = parser.parse_args()
 
@@ -121,11 +125,18 @@ def main():
 
     cudnn.benchmark = True
 
-    # Create model with no_kan flag if present in config
-    no_kan = config.get('no_kan', False)
-    model = archs.__dict__[config['arch']](config['num_classes'], config['input_channels'], config['deep_supervision'], embed_dims=config['input_list'], no_kan=no_kan)
+    device = torch.device('cpu' if args.cpu else 'cuda')
 
-    model = model.cuda()
+    if args.yolo_exp:
+        yolo_model_path = os.path.join('runs', args.yolo_exp, 'weights', 'best.pt')
+        print(f"Loading YOLO model from {yolo_model_path}")
+        model = YOLO(yolo_model_path)
+    else:
+        # Create model with no_kan flag if present in config
+        no_kan = config.get('no_kan', False)
+        kan_type = config.get('kan_type', 'FasterKAN')
+        model = archs.__dict__[config['arch']](config['num_classes'], config['input_channels'], config['deep_supervision'], embed_dims=config['input_list'], no_kan=no_kan, kan_type=kan_type)
+        model = model.to(device)
 
     # BDD100K dataset paths
     bdd100k_base = '/storage/student11/bdd100k_seg/bdd100k/seg'
@@ -140,28 +151,29 @@ def main():
     
     print(f"Validation samples: {len(val_img_ids)}")
 
-    # Load model weights
-    model_path = f'{args.output_dir}/{args.name}/checkpoint_best.pth'
-    print(f"Loading model from {model_path}")
-    ckpt = torch.load(model_path)
+    if not args.yolo_exp:
+        # Load model weights
+        model_path = f'{args.output_dir}/{args.name}/checkpoint_best.pth'
+        print(f"Loading model from {model_path}")
+        ckpt = torch.load(model_path)
 
-    try:        
-        model.load_state_dict(ckpt)
-    except:
-        print("Pretrained model keys:", ckpt.keys())
-        print("Current model keys:", model.state_dict().keys())
+        try:        
+            model.load_state_dict(ckpt)
+        except:
+            print("Pretrained model keys:", ckpt.keys())
+            print("Current model keys:", model.state_dict().keys())
 
-        pretrained_dict = {k: v for k, v in ckpt.items() if k in model.state_dict()}
-        current_dict = model.state_dict()
-        diff_keys = set(current_dict.keys()) - set(pretrained_dict.keys())
+            pretrained_dict = {k: v for k, v in ckpt.items() if k in model.state_dict()}
+            current_dict = model.state_dict()
+            diff_keys = set(current_dict.keys()) - set(pretrained_dict.keys())
 
-        print("Difference in model keys:")
-        for key in diff_keys:
-            print(f"Key: {key}")
+            print("Difference in model keys:")
+            for key in diff_keys:
+                print(f"Key: {key}")
 
-        model.load_state_dict(ckpt, strict=False)
-        
-    model.eval()
+            model.load_state_dict(ckpt, strict=False)
+            
+        model.eval()
 
     val_transform = Compose([
         Resize(config['input_h'], config['input_w']),
@@ -187,6 +199,7 @@ def main():
 
     iou_avg_meter = AverageMeter()
     dice_avg_meter = AverageMeter()
+    map_avg_meter = AverageMeter()
     
     # Per-class IoU tracking
     class_iou_sum = np.zeros(BDD100K_NUM_CLASSES)
@@ -204,22 +217,76 @@ def main():
 
     with torch.no_grad():
         for input, target, meta in tqdm(val_loader, total=len(val_loader)):
-            input = input.cuda()
-            target = target.cuda()
-            model = model.cuda()
-            start = time.perf_counter() 
-            # compute output
-            output = model(input)
-	    end = time.perf_counter()
+            input = input.to(device)
+            target = target.to(device)
+            start = time.perf_counter()
+            
+            if args.yolo_exp:
+                # YOLO Inference (needs raw image paths)
+                raw_img_paths = [os.path.join(bdd100k_base, 'images', 'val', f"{img_id}.jpg") for img_id in meta['img_id']]
+                results = model(raw_img_paths, verbose=False, device=device)
+                end = time.perf_counter()
+                
+                # Convert YOLO results to semantic segmentation format (B, C, H, W)
+                H, W = config['input_h'], config['input_w']
+                output_pseudo_batch = []
+                pred_masks_batch = []
+                
+                for res in results:
+                    semantic_mask = np.zeros((H, W), dtype=np.uint8)
+                    pseudo_output = np.zeros((config['num_classes'], H, W), dtype=np.float32)
+                    
+                    if res.masks is not None:
+                        masks = res.masks.data.cpu().numpy()
+                        classes = res.boxes.cls.cpu().numpy().astype(int)
+                        conf = res.boxes.conf.cpu().numpy()
+                        
+                        sorted_idx = np.argsort(conf)
+                        for idx in sorted_idx:
+                            c = classes[idx]
+                            mask = masks[idx]
+                            if mask.shape != (H, W):
+                                mask = cv2.resize(mask, (W, H), interpolation=cv2.INTER_NEAREST)
+                            valid_mask = mask > 0.5
+                            semantic_mask[valid_mask] = c
+                            pseudo_output[c, valid_mask] = 1.0
+                            
+                    pred_masks_batch.append(semantic_mask)
+                    output_pseudo_batch.append(pseudo_output)
+                    
+                output = torch.tensor(np.array(output_pseudo_batch)).to(device)
+                output_sigmoid = output
+                pred_masks = np.array(pred_masks_batch)
+            else:
+                model = model.to(device)
+                output = model(input)
+                end = time.perf_counter()
+                output_sigmoid = torch.sigmoid(output)
+                pred_masks = torch.argmax(output_sigmoid, dim=1).cpu().numpy()  # (B, H, W)
+
             iou, dice, _ = iou_score(output, target)
             iou_avg_meter.update(iou, input.size(0))
             dice_avg_meter.update(dice, input.size(0))
-	    infer_time = end - start 
-            timer.append(timer)	
-            # Get predictions (argmax over channels)
-            output_sigmoid = torch.sigmoid(output)
-            pred_masks = torch.argmax(output_sigmoid, dim=1).cpu().numpy()  # (B, H, W)
+            infer_time = end - start 
+            timer.append(infer_time)
             
+            # Calculate mAP
+            batch_map = 0
+            valid_classes = 0
+            
+            target_np = target.cpu().numpy()
+            output_sigmoid_np = output_sigmoid.cpu().numpy()
+            
+            for c in range(config.get('num_classes', BDD100K_NUM_CLASSES)):
+                y_true = target_np[:, c, ...].flatten()
+                y_scores = output_sigmoid_np[:, c, ...].flatten()
+                if y_true.sum() > 0:
+                    ap = average_precision_score(y_true, y_scores)
+                    batch_map += ap
+                    valid_classes += 1
+            if valid_classes > 0:
+                map_avg_meter.update(batch_map / valid_classes, 1)
+
             # Get ground truth masks (argmax over one-hot)
             gt_masks = torch.argmax(target, dim=1).cpu().numpy()  # (B, H, W)
             
@@ -247,12 +314,16 @@ def main():
                     vis_pred_masks.append(pred)
                     vis_img_ids.append(img_id)
 	
+    fps = len(val_dataset) / sum(timer) if sum(timer) > 0 else 0
+
     # Print overall metrics
     print('\n' + '='*50)
-    print(f'Model: {config["name"]}')
+    print(f'Model: {config["name"]}' if not args.yolo_exp else f'YOLO Exp: {args.yolo_exp}')
     print('='*50)
     print(f'Overall IoU: {iou_avg_meter.avg:.4f}')
     print(f'Overall Dice: {dice_avg_meter.avg:.4f}')
+    print(f'Overall mAP: {map_avg_meter.avg:.4f}')
+    print(f'Average FPS: {fps:.2f}')
     print('='*50)
     
     # Plot visualization results
@@ -284,7 +355,7 @@ def main():
         axes[idx, 2].set_title('Prediction' if idx == 0 else '')
         axes[idx, 2].axis('off')
     
-    plt.suptitle(f'BDD100K Validation Results - IoU: {iou_avg_meter.avg:.4f}, Dice: {dice_avg_meter.avg:.4f}', fontsize=14)
+    plt.suptitle(f'BDD100K Val Results - IoU: {iou_avg_meter.avg:.4f}, Dice: {dice_avg_meter.avg:.4f}, mAP: {map_avg_meter.avg:.4f}, FPS: {fps:.2f}' if not args.yolo_exp else f'YOLO {args.yolo_exp} Val - IoU: {iou_avg_meter.avg:.4f}, mAP: {map_avg_meter.avg:.4f}, FPS: {fps:.2f}', fontsize=14)
     plt.tight_layout()
     plt.savefig(os.path.join(vis_dir, 'summary_results.png'), dpi=150, bbox_inches='tight')
     plt.close()
@@ -293,9 +364,11 @@ def main():
     # Save metrics to file
     metrics_path = os.path.join(args.output_dir, config['name'], 'val_metrics.txt')
     with open(metrics_path, 'w') as f:
-        f.write(f"Model: {config['name']}\n")
+        f.write(f"Model: {config['name'] if not args.yolo_exp else args.yolo_exp}\n")
         f.write(f"Overall IoU: {iou_avg_meter.avg:.4f}\n")
         f.write(f"Overall Dice: {dice_avg_meter.avg:.4f}\n")
+        f.write(f"Overall mAP: {map_avg_meter.avg:.4f}\n")
+        f.write(f"Average FPS: {fps:.2f}\n")
     print(f"Saved metrics to {metrics_path}")
 
 

@@ -8,6 +8,22 @@ import collections.abc as container_abcs
 
 from kan import KANLinear
 
+def get_kan_linear(kan_type):
+    if kan_type == "ReLU":
+        from kan_variants import ReLUKANLinear
+        return ReLUKANLinear
+    elif kan_type == "HardSwish":
+        from kan_variants import HardSwishKANLinear
+        return HardSwishKANLinear
+    elif kan_type == "PWLO":
+        from kan_variants import PWLOKANLinear
+        return PWLOKANLinear
+    elif kan_type == "TeLU":
+        from kan_variants import TeLUKANLinear
+        return TeLUKANLinear
+    else:
+        return KANLinear
+
 __all__ = ["UKAN"]
 
 
@@ -20,6 +36,7 @@ class KANLayer(nn.Module):
         act_layer=nn.GELU,
         drop=0.0,
         no_kan=False,
+        kan_type="FasterKAN",
     ):
         super().__init__()
         out_features = out_features or in_features
@@ -30,9 +47,10 @@ class KANLayer(nn.Module):
         grid_size = 8
 
         if not no_kan:
-            self.fc1 = KANLinear(in_features, hidden_features, grid_size=grid_size)
-            self.fc2 = KANLinear(hidden_features, hidden_features, grid_size=grid_size)
-            self.fc3 = KANLinear(hidden_features, out_features, grid_size=grid_size)
+            kan_class = get_kan_linear(kan_type)
+            self.fc1 = kan_class(in_features, hidden_features, grid_size=grid_size)
+            self.fc2 = kan_class(hidden_features, hidden_features, grid_size=grid_size)
+            self.fc3 = kan_class(hidden_features, out_features, grid_size=grid_size)
         else:
             self.fc1 = nn.Linear(in_features, hidden_features)
             self.fc2 = nn.Linear(hidden_features, out_features)
@@ -87,6 +105,7 @@ class KANBlock(nn.Module):
         act_layer=nn.GELU,
         norm_layer=nn.LayerNorm,
         no_kan=False,
+        kan_type="FasterKAN",
     ):
         super().__init__()
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
@@ -98,6 +117,7 @@ class KANBlock(nn.Module):
             act_layer=act_layer,
             drop=drop,
             no_kan=no_kan,
+            kan_type=kan_type,
         )
         self.apply(self._init_weights)
 
@@ -240,6 +260,7 @@ class UKAN(nn.Module):
         drop_path_rate=0.0,
         norm_layer=nn.LayerNorm,
         depths=[1, 1, 1],
+        kan_type="FasterKAN",
         **kwargs,
     ):
         super().__init__()
@@ -265,6 +286,8 @@ class UKAN(nn.Module):
                     drop=drop_rate,
                     drop_path=dpr[0],
                     norm_layer=norm_layer,
+                    no_kan=no_kan,
+                    kan_type=kan_type,
                 )
             ]
         )
@@ -275,6 +298,8 @@ class UKAN(nn.Module):
                     drop=drop_rate,
                     drop_path=dpr[1],
                     norm_layer=norm_layer,
+                    no_kan=no_kan,
+                    kan_type=kan_type,
                 )
             ]
         )
@@ -285,6 +310,8 @@ class UKAN(nn.Module):
                     drop=drop_rate,
                     drop_path=dpr[0],
                     norm_layer=norm_layer,
+                    no_kan=no_kan,
+                    kan_type=kan_type,
                 )
             ]
         )
@@ -295,6 +322,8 @@ class UKAN(nn.Module):
                     drop=drop_rate,
                     drop_path=dpr[1],
                     norm_layer=norm_layer,
+                    no_kan=no_kan,
+                    kan_type=kan_type,
                 )
             ]
         )

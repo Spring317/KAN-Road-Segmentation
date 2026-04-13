@@ -99,6 +99,7 @@ def parse_args():
     parser.add_argument("--input_h", default=192, type=int)
     parser.add_argument("--input_list", type=list_type, default=[64, 128, 256])
     parser.add_argument("--no_kan", action="store_true")
+    parser.add_argument("--kan_type", default="FasterKAN", choices=["FasterKAN", "ReLU", "HardSwish", "PWLO", "TeLU"])
 
     # Loss
     parser.add_argument("--loss", default="BCEDiceLoss", choices=LOSS_NAMES)
@@ -215,7 +216,8 @@ def load_ukan_model(config) -> nn.Module:
         config["input_channels"],
         config["deep_supervision"],
         embed_dims=config["input_list"],
-        no_kan=config["no_kan"],
+        no_kan=config.get("no_kan", False),
+        kan_type=config.get("kan_type", "FasterKAN"),
     )
 
 
