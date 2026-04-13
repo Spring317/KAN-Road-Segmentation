@@ -8,7 +8,7 @@ BATCH_SIZE=4
 GRAD_ACCUM=4
 EPOCHS=100
 
-echo "Starting automated KAN permutation deployment on 1 GPU (Sequential)..."
+echo "Starting automated KAN permutation deployment on 1 GPU (Parallel)..."
 mkdir -p outputs
 
 for KAN_TYPE in FasterKAN ReLU HardSwish PWLO TeLU; do
@@ -25,9 +25,11 @@ for KAN_TYPE in FasterKAN ReLU HardSwish PWLO TeLU; do
         --use_amp True \
         --epochs $EPOCHS \
         --num_workers 4 \
-        --compile_model True 2>&1 | tee "outputs/terminal_${KAN_TYPE}.log"
+        --compile_model True > "outputs/terminal_${KAN_TYPE}.log" 2>&1 &
         
-    echo "Finished ${KAN_TYPE}-KAN!"
+    echo "Deployed ${KAN_TYPE}-KAN into the background (logs: outputs/terminal_${KAN_TYPE}.log)..."
 done
 
-echo "All permutations successfully deployed sequentially!"
+echo "Waiting for all parallel permutations to finish..."
+wait
+echo "All permutations successfully deployed in parallel!"
