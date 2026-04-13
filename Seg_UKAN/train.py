@@ -447,7 +447,7 @@ def main():
     model = model.cuda()
 
     if config["compile_model"] and hasattr(torch, "compile"):
-        model = torch.compile(model)
+        model = torch.compile(model, dynamic=True)
 
     if distributed:
         model = DDP(
