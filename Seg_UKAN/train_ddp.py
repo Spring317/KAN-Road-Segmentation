@@ -53,7 +53,7 @@ from utils import AverageMeter, str2bool
 
 from tensorboardX import SummaryWriter
 import shutil
-from train_yolo import model as yolo_model
+from ultralytics import YOLO
 
 ARCH_NAMES = archs.__all__
 LOSS_NAMES = losses.__all__
