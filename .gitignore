@@ -1,3 +1,6 @@
 *.pyc
 ./Seg_UKAN/outputs
 
+Seg_UKAN/runs/
+Seg_UKAN/outputs/
+**/*.pt
