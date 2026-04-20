@@ -36,6 +36,7 @@ def parse_args():
     parser.add_argument('--num_vis', default=10, type=int, help='number of images to visualize')
     parser.add_argument('--yolo_exp', default=None, help='YOLO experiment name (e.g., yolo_exp2, yolo_exp3, yolo_exp4). If provided, validates this YOLO model.')
     parser.add_argument('--cpu', action='store_true', help='Use CPU for evaluation')
+    parser.add_argument('--batch_size', default=1, type=int, help='Batch size for evaluation (default: 1)')
             
     args = parser.parse_args()
 
@@ -192,7 +193,7 @@ def main():
     )
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
-        batch_size=config['batch_size'],
+        batch_size=args.batch_size,
         shuffle=False,
         num_workers=config['num_workers'],
         drop_last=False)
