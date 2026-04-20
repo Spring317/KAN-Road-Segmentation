@@ -27,11 +27,23 @@ from tqdm import tqdm
 from ultralytics import YOLO
 import difflib
 
-import archs
-import losses
-from dataset import BDD100KDataset, BDD100K_NUM_CLASSES
-from metrics import iou_score
-from utils import AverageMeter, str2bool
+import src.models as archs
+import src.training.losses as losses
+from src.data import BDD100KDataset, BDD100K_NUM_CLASSES
+from src.training.metrics import iou_score
+from src.utils.meters import AverageMeter
+from src.utils.seed import seed_torch
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ("true", "1", "yes"):
+        return True
+    if v.lower() in ("false", "0", "no"):
+        return False
+    import argparse
+    raise argparse.ArgumentTypeError("Boolean value expected.")
 from yolo_data_prep import BDD100KYOLOPreparer
 
 ARCH_NAMES = archs.__all__
@@ -200,18 +212,6 @@ def reduce_tensor(tensor, world_size):
     dist.all_reduce(rt, op=dist.ReduceOp.SUM)
     rt /= world_size
     return rt
-
-
-def seed_torch(seed=1029, rank=0):
-    seed = seed + rank
-    random.seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cudnn.deterministic = False
 
 
 def get_base_model(model, distributed):
