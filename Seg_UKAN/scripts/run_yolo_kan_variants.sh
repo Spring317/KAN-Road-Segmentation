@@ -55,12 +55,12 @@ for FREEZE_BACKBONE in True False; do
             CUDA_VISIBLE_DEVICES=0 python train.py "${COMMON_ARGS[@]}" > "$LOG_FILE" 2>&1 &
         fi
         
-        # We wait for each to finish since doing all 10 in background on 1 GPU will OOM
-        wait
-        
-        echo " → Finished  (log: ${LOG_FILE})"
+        echo " → Launched in background  (log: ${LOG_FILE})"
     done
 done
+
+# Wait for all background instances to finish
+wait
 
 echo ""
 echo "All YOLO-KAN experiments finished!"
