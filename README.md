@@ -123,7 +123,14 @@ bash scripts/eval_all_variants.sh \
 # 5. CPU mode via environment variable
 USE_CPU=1 bash scripts/eval_all_variants.sh
 
-# 6. Explicit checkpoint for every variant (quick testing)
+# 6. High-Performance CPU mode (force 100% CPU utilisation)
+# Adjust NUM_THREADS to your cluster's physical core count
+BATCH_SIZE=8 NUM_WORKERS=16 NUM_THREADS=32 bash scripts/eval_all_variants.sh \
+    /path/to/outputs \
+    /path/to/bdd100k/seg \
+    --cpu
+
+# 7. Explicit checkpoint for every variant (quick testing)
 MODEL_PATH=/path/to/checkpoint_best.pth bash scripts/eval_all_variants.sh
 ```
 
