@@ -58,6 +58,18 @@ def parse_args():
     )
     parser.add_argument("--cpu", action="store_true", help="Use CPU for evaluation")
     parser.add_argument(
+        "--num_threads",
+        default=0,
+        type=int,
+        help="Number of threads for CPU inference. If 0, uses all available cores.",
+    )
+    parser.add_argument(
+        "--num_workers",
+        default=-1,
+        type=int,
+        help="Number of dataloader workers. Defaults to the value in the training config.",
+    )
+    parser.add_argument(
         "--batch_size",
         default=1,
         type=int,
@@ -87,13 +99,13 @@ def plot_results(images, gt_masks, pred_masks, img_ids, save_dir, num_vis=10):
         axes[0].axis("off")
 
         # Ground truth mask (colorized)
-        gt_colored = colorize_mask(gt_masks[idx])
+        gt_colored = colorize_mask(gt_masks[idx], color_dict=BDD100K_COLOR_DICT)
         axes[1].imshow(gt_colored)
         axes[1].set_title("Ground Truth")
         axes[1].axis("off")
 
         # Predicted mask (colorized)
-        pred_colored = colorize_mask(pred_masks[idx])
+        pred_colored = colorize_mask(pred_masks[idx], color_dict=BDD100K_COLOR_DICT)
         axes[2].imshow(pred_colored)
         axes[2].set_title("Prediction")
         axes[2].axis("off")
@@ -147,6 +159,11 @@ def main():
     print("-" * 20)
 
     cudnn.benchmark = True
+
+    if args.cpu and args.num_threads > 0:
+        torch.set_num_threads(args.num_threads)
+        os.environ["OMP_NUM_THREADS"] = str(args.num_threads)
+        os.environ["MKL_NUM_THREADS"] = str(args.num_threads)
 
     device = torch.device("cpu" if args.cpu else "cuda")
 
@@ -210,11 +227,12 @@ def main():
         transform=val_transform,
         mask_suffix="_train_id",
     )
+    workers = args.num_workers if args.num_workers >= 0 else config["num_workers"]
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=config["num_workers"],
+        num_workers=workers,
         drop_last=False,
     )
 
@@ -328,7 +346,7 @@ def main():
                 zip(pred_masks, gt_masks, meta["img_id"])
             ):
                 # Save prediction as colored mask
-                pred_colored = colorize_mask(pred)
+                pred_colored = colorize_mask(pred, color_dict=BDD100K_COLOR_DICT)
                 cv2.imwrite(
                     os.path.join(output_dir, f"{img_id}_pred.png"),
                     cv2.cvtColor(pred_colored, cv2.COLOR_RGB2BGR),
@@ -390,13 +408,13 @@ def main():
         axes[idx, 0].axis("off")
 
         # Ground truth
-        gt_colored = colorize_mask(vis_gt_masks[idx])
+        gt_colored = colorize_mask(vis_gt_masks[idx], color_dict=BDD100K_COLOR_DICT)
         axes[idx, 1].imshow(gt_colored)
         axes[idx, 1].set_title("Ground Truth" if idx == 0 else "")
         axes[idx, 1].axis("off")
 
         # Prediction
-        pred_colored = colorize_mask(vis_pred_masks[idx])
+        pred_colored = colorize_mask(vis_pred_masks[idx], color_dict=BDD100K_COLOR_DICT)
         axes[idx, 2].imshow(pred_colored)
         axes[idx, 2].set_title("Prediction" if idx == 0 else "")
         axes[idx, 2].axis("off")
