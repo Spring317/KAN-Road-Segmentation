@@ -153,26 +153,26 @@ def main():
     print(f"Validation samples: {len(val_img_ids)}")
 
     if not args.yolo_exp:
-        # Load model weights
+        # Load model weights — try checkpoint_best.pth first, fall back to model_best.pth
         model_path = f'{args.output_dir}/{args.name}/checkpoint_best.pth'
+        if not os.path.exists(model_path):
+            model_path = f'{args.output_dir}/{args.name}/model_best.pth'
         print(f"Loading model from {model_path}")
-        ckpt = torch.load(model_path)
+        ckpt = torch.load(model_path, map_location=device)
 
-        try:        
+        # Strip _orig_mod. prefix produced by torch.compile
+        ckpt = {k.replace('_orig_mod.', ''): v for k, v in ckpt.items()}
+
+        try:
             model.load_state_dict(ckpt)
-        except:
-            print("Pretrained model keys:", ckpt.keys())
-            print("Current model keys:", model.state_dict().keys())
-
-            pretrained_dict = {k: v for k, v in ckpt.items() if k in model.state_dict()}
-            current_dict = model.state_dict()
-            diff_keys = set(current_dict.keys()) - set(pretrained_dict.keys())
-
-            print("Difference in model keys:")
-            for key in diff_keys:
-                print(f"Key: {key}")
-
-            model.load_state_dict(ckpt, strict=False)
+            print("Model loaded successfully.")
+        except Exception as e:
+            print(f"Strict load failed ({e}), trying strict=False...")
+            missing, unexpected = model.load_state_dict(ckpt, strict=False)
+            if missing:
+                print(f"  Missing keys  ({len(missing)}): {missing[:5]} ...")
+            if unexpected:
+                print(f"  Unexpected keys ({len(unexpected)}): {unexpected[:5]} ...")
             
         model.eval()
 
