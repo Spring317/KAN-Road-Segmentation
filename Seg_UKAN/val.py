@@ -37,6 +37,7 @@ def parse_args():
     parser.add_argument('--yolo_exp', default=None, help='YOLO experiment name (e.g., yolo_exp2, yolo_exp3, yolo_exp4). If provided, validates this YOLO model.')
     parser.add_argument('--cpu', action='store_true', help='Use CPU for evaluation')
     parser.add_argument('--batch_size', default=1, type=int, help='Batch size for evaluation (default: 1)')
+    parser.add_argument('--model_path', default=None, help='Explicit path to checkpoint file. Overrides the default outputs/{name}/checkpoint_best.pth path.')
             
     args = parser.parse_args()
 
@@ -153,10 +154,13 @@ def main():
     print(f"Validation samples: {len(val_img_ids)}")
 
     if not args.yolo_exp:
-        # Load model weights — try checkpoint_best.pth first, fall back to model_best.pth
-        model_path = f'{args.output_dir}/{args.name}/checkpoint_best.pth'
-        if not os.path.exists(model_path):
-            model_path = f'{args.output_dir}/{args.name}/model_best.pth'
+        # Load model weights — explicit path takes priority, then checkpoint_best.pth, then model_best.pth
+        if args.model_path:
+            model_path = args.model_path
+        else:
+            model_path = f'{args.output_dir}/{args.name}/checkpoint_best.pth'
+            if not os.path.exists(model_path):
+                model_path = f'{args.output_dir}/{args.name}/model_best.pth'
         print(f"Loading model from {model_path}")
         ckpt = torch.load(model_path, map_location=device)
 
