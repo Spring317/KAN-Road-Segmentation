@@ -37,7 +37,6 @@ def parse_args():
     parser.add_argument('--yolo_exp', default=None, help='YOLO experiment name (e.g., yolo_exp2, yolo_exp3, yolo_exp4). If provided, validates this YOLO model.')
     parser.add_argument('--cpu', action='store_true', help='Use CPU for evaluation')
     parser.add_argument('--batch_size', default=1, type=int, help='Batch size for evaluation (default: 1)')
-    parser.add_argument('--model_path', default=None, help='Explicit path to checkpoint file. Overrides the default outputs/{name}/checkpoint_best.pth path.')
             
     args = parser.parse_args()
 
@@ -154,35 +153,32 @@ def main():
     print(f"Validation samples: {len(val_img_ids)}")
 
     if not args.yolo_exp:
-        # Load model weights — explicit path takes priority, then checkpoint_best.pth, then model_best.pth
-        if args.model_path:
-            model_path = args.model_path
-        else:
-            model_path = f'{args.output_dir}/{args.name}/checkpoint_best.pth'
-            if not os.path.exists(model_path):
-                model_path = f'{args.output_dir}/{args.name}/model_best.pth'
+        # Load model weights
+        model_path = f'{args.output_dir}/{args.name}/checkpoint_best.pth'
         print(f"Loading model from {model_path}")
-        ckpt = torch.load(model_path, map_location=device)
+        ckpt = torch.load(model_path)
 
-        # Strip _orig_mod. prefix produced by torch.compile
-        ckpt = {k.replace('_orig_mod.', ''): v for k, v in ckpt.items()}
-
-        try:
+        try:        
             model.load_state_dict(ckpt)
-            print("Model loaded successfully.")
-        except Exception as e:
-            print(f"Strict load failed ({e}), trying strict=False...")
-            missing, unexpected = model.load_state_dict(ckpt, strict=False)
-            if missing:
-                print(f"  Missing keys  ({len(missing)}): {missing[:5]} ...")
-            if unexpected:
-                print(f"  Unexpected keys ({len(unexpected)}): {unexpected[:5]} ...")
+        except:
+            print("Pretrained model keys:", ckpt.keys())
+            print("Current model keys:", model.state_dict().keys())
+
+            pretrained_dict = {k: v for k, v in ckpt.items() if k in model.state_dict()}
+            current_dict = model.state_dict()
+            diff_keys = set(current_dict.keys()) - set(pretrained_dict.keys())
+
+            print("Difference in model keys:")
+            for key in diff_keys:
+                print(f"Key: {key}")
+
+            model.load_state_dict(ckpt, strict=False)
             
         model.eval()
 
     val_transform = Compose([
         Resize(config['input_h'], config['input_w']),
-        Normalize(),
+        transforms.Normalize(),
     ])
 
     val_dataset = BDD100KDataset(
