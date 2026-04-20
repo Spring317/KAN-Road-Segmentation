@@ -69,6 +69,8 @@ class YOLOKANSeg(nn.Module):
         no_kan: bool = False,
         yolo_weights: str = "yolo11m-seg.pt",
         freeze_backbone: bool = False,
+        input_h: int = 192,
+        input_w: int = 256,
         **kwargs,
     ):
         super().__init__()
@@ -79,21 +81,21 @@ class YOLOKANSeg(nn.Module):
         self.freeze_backbone = freeze_backbone
         
         yolo = YOLO(yolo_weights)
-        self.yolo = yolo.model.model
+        self.yolo_wrapper = yolo.model
         
-        original_head = self.yolo[-1]
+        original_head = self.yolo_wrapper.model[-1]
         
         # Dry run to find FPN feature dimensions entering the head
         in_channels_list = []
         try:
-            device = next(self.yolo.parameters()).device
-            dummy = torch.randn(1, 3, 256, 256).to(device)
+            device = next(self.yolo_wrapper.parameters()).device
+            dummy = torch.randn(1, 3, input_h, input_w).to(device)
             def hook(module, input):
                 for t in input[0]:
                     in_channels_list.append(t.shape[1])
             h = original_head.register_forward_pre_hook(hook)
             with torch.no_grad():
-                self.yolo(dummy)
+                self.yolo_wrapper(dummy)
             h.remove()
         except Exception:
             # Fallback to common dimensions if dry run fails
@@ -106,17 +108,18 @@ class YOLOKANSeg(nn.Module):
         kan_head.f = getattr(original_head, 'f', -1)
         kan_head.i = getattr(original_head, 'i', -1)
         
-        self.yolo[-1] = kan_head
-        self.kan_head = self.yolo[-1]
+        self.yolo_wrapper.model[-1] = kan_head
+        self.kan_head = self.yolo_wrapper.model[-1]
         
         if freeze_backbone:
-            for name, p in self.yolo.named_parameters():
+            for name, p in self.yolo_wrapper.named_parameters():
                 if id(p) not in [id(hp) for hp in self.kan_head.parameters()]:
                     p.requires_grad = False
 
     def forward(self, x):
         input_shape = x.shape[2:]
-        out = self.yolo(x)
+        # self.yolo_wrapper is the SegmentationModel, which uses _predict_once to properly handle skip connections
+        out = self.yolo_wrapper(x)
         
         if isinstance(out, tuple):
             out = out[0]

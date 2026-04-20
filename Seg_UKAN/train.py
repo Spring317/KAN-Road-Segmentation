@@ -242,7 +242,9 @@ def load_yolokan_model(config, rank) -> nn.Module:
         kan_type=config.get("kan_type", "FasterKAN"),
         no_kan=config.get("no_kan", False),
         yolo_weights=weights_path,
-        freeze_backbone=config.get("yolo_freeze_backbone", False)
+        freeze_backbone=config.get("yolo_freeze_backbone", False),
+        input_h=config.get("input_h", 192),
+        input_w=config.get("input_w", 256)
     )
     
     if is_main_process(rank):
