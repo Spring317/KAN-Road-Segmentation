@@ -86,11 +86,20 @@ CUDA_VISIBLE_DEVICES=0 python train.py \
 conda activate ukan
 cd Seg_UKAN
 
-# Default — looks for checkpoints in Seg_UKAN/outputs/
+# Default — GPU, looks for checkpoints in Seg_UKAN/outputs/
 bash eval_all_variants.sh
 
 # Custom output directory (e.g. on a cluster with a different mount point)
 bash eval_all_variants.sh /mnt/ssd-0/M2_internship/KAN-Road-Segmentation/Seg_UKAN/outputs
+
+# CPU mode — no GPU required (useful for machines without CUDA)
+bash eval_all_variants.sh outputs --cpu
+
+# CPU mode with a custom output directory
+bash eval_all_variants.sh /path/to/outputs --cpu
+
+# CPU mode via environment variable
+USE_CPU=1 bash eval_all_variants.sh
 
 # Provide an explicit checkpoint path (applied to every variant — for quick testing)
 MODEL_PATH=/path/to/checkpoint_best.pth bash eval_all_variants.sh
@@ -105,16 +114,32 @@ Metrics and visualisations are saved under `<OUTPUT_DIR>/bdd100k_<KAN_TYPE>/`.
 conda activate ukan
 cd Seg_UKAN
 
+# GPU inference (default)
 python val.py \
     --name       bdd100k_HardSwish \
     --output_dir outputs            \
     --batch_size 1
+
+# CPU inference — no GPU required
+python val.py \
+    --name       bdd100k_HardSwish \
+    --output_dir outputs            \
+    --batch_size 1                  \
+    --cpu
 
 # Override the checkpoint path explicitly
 python val.py \
     --name       bdd100k_HardSwish \
     --output_dir outputs            \
     --batch_size 1                  \
+    --model_path outputs/bdd100k_HardSwish/model_best.pth
+
+# CPU + explicit checkpoint
+python val.py \
+    --name       bdd100k_HardSwish \
+    --output_dir outputs            \
+    --batch_size 1                  \
+    --cpu                           \
     --model_path outputs/bdd100k_HardSwish/model_best.pth
 ```
 
@@ -127,7 +152,7 @@ python val.py \
 | `--model_path` | *(auto)* | Explicit checkpoint path — overrides the auto-discovered `checkpoint_best.pth` / `model_best.pth` |
 | `--batch_size` | `1` | Batch size for the validation dataloader |
 | `--num_vis` | `10` | Number of sample images to visualise |
-| `--cpu` | `False` | Run on CPU instead of CUDA |
+| `--cpu` | `False` | Run on CPU instead of CUDA (no GPU required) |
 | `--yolo_exp` | `None` | Validate a YOLO experiment instead of a KAN model |
 
 ---
