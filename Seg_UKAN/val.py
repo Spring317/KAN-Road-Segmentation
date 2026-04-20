@@ -1,39 +1,36 @@
-#! /data/cxli/miniconda3/envs/th200/bin/python
+#! /usr/bin/env python
 import argparse
 import os
+import time
+from collections import OrderedDict
 from glob import glob
-import random
-import numpy as np
-import matplotlib.pyplot as plt
 
 import cv2
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import yaml
-from albumentations import Normalize
+from albumentations import Normalize, RandomRotate90, Resize
 from albumentations.core.composition import Compose
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import average_precision_score
 from tqdm import tqdm
-from collections import OrderedDict
 from ultralytics import YOLO
 
-import archs
+import archs  # shim → src.models
 
-from dataset import (
-    BDD100KDataset,
-    BDD100K_NUM_CLASSES,
-    BDD100K_COLOR_DICT,
+from src.data import (
     BDD100K_CLASSES,
+    BDD100K_COLOR_DICT,
+    BDD100K_NUM_CLASSES,
+    BDD100KDataset,
     colorize_mask,
     onehot_to_mask,
 )
-from metrics import iou_score
-from utils import AverageMeter
-from albumentations import RandomRotate90, Resize
-import time
-
-from PIL import Image
+from src.training.metrics import iou_score
+from src.utils.meters import AverageMeter
+from src.utils.seed import seed_torch
+from src.utils.checkpoint import load_checkpoint
 
 
 def parse_args():
@@ -70,17 +67,6 @@ def parse_args():
     args = parser.parse_args()
 
     return args
-
-
-def seed_torch(seed=1029):
-    random.seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = True
 
 
 def plot_results(images, gt_masks, pred_masks, img_ids, save_dir, num_vis=10):
@@ -196,7 +182,7 @@ def main():
     print(f"Validation samples: {len(val_img_ids)}")
 
     if not args.yolo_exp:
-        # Load model weights — explicit path takes priority, then checkpoint_best.pth, then model_best.pth
+        # Resolve checkpoint path — explicit > checkpoint_best.pth > model_best.pth
         if args.model_path:
             model_path = args.model_path
         else:
@@ -204,28 +190,7 @@ def main():
             if not os.path.exists(model_path):
                 model_path = f"{args.output_dir}/{args.name}/model_best.pth"
         print(f"Loading model from {model_path}")
-        ckpt = torch.load(model_path, map_location=device)
-
-        # Support both raw state_dicts and full training checkpoints
-        # (full checkpoints contain model_state_dict, optimizer_state_dict, epoch, etc.)
-        if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
-            print(f"  Full checkpoint detected (epoch {ckpt.get('epoch', '?')}, best_iou {ckpt.get('best_iou', '?'):.4f})")
-            ckpt = ckpt["model_state_dict"]
-
-        # Strip _orig_mod. prefix produced by torch.compile
-        ckpt = {k.replace("_orig_mod.", ""): v for k, v in ckpt.items()}
-
-        try:
-            model.load_state_dict(ckpt)
-            print("Model loaded successfully.")
-        except Exception as e:
-            print(f"Strict load failed ({e}), trying strict=False...")
-            missing, unexpected = model.load_state_dict(ckpt, strict=False)
-            if missing:
-                print(f"  Missing keys  ({len(missing)}): {missing[:5]} ...")
-            if unexpected:
-                print(f"  Unexpected keys ({len(unexpected)}): {unexpected[:5]} ...")
-
+        load_checkpoint(model, model_path, device=device)
         model.eval()
 
     val_transform = Compose(

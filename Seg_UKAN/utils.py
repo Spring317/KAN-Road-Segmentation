@@ -1,36 +1,26 @@
+# utils.py — compatibility shim
 import argparse
+
 import torch.nn as nn
 
+from src.utils.meters import AverageMeter  # noqa: F401
+from src.utils.seed import seed_torch  # noqa: F401
+from src.utils.checkpoint import load_checkpoint  # noqa: F401
+
+
 class qkv_transform(nn.Conv1d):
-    """Conv1d for qkv_transform"""
+    """Conv1d for qkv_transform (kept for legacy compat)."""
+
 
 def str2bool(v):
-    if v.lower() in ['true', 1]:
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ("true", "1", "yes"):
         return True
-    elif v.lower() in ['false', 0]:
+    if v.lower() in ("false", "0", "no"):
         return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
+    raise argparse.ArgumentTypeError("Boolean value expected.")
 
 
-def count_params(model):
+def count_params(model) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-
-class AverageMeter(object):
-    """Computes and stores the average and current value"""
-
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count

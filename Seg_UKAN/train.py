@@ -522,7 +522,7 @@ def main():
         scheduler = None
 
     if is_main_process(rank):
-        shutil.copy2("train_ddp.py", os.path.join(exp_dir, "train_ddp.py"))
+        shutil.copy2("train.py", os.path.join(exp_dir, "train.py"))
         shutil.copy2("archs.py", os.path.join(exp_dir, "archs.py"))
 
     train_transform = Compose(
