@@ -10,7 +10,7 @@ import cv2
 import torch
 import torch.backends.cudnn as cudnn
 import yaml
-from albumentations.augmentations import transforms
+from albumentations import Normalize
 from albumentations.core.composition import Compose
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import average_precision_score
@@ -178,7 +178,7 @@ def main():
 
     val_transform = Compose([
         Resize(config['input_h'], config['input_w']),
-        transforms.Normalize(),
+        Normalize(),
     ])
 
     val_dataset = BDD100KDataset(
