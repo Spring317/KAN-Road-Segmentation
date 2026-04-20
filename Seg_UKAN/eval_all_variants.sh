@@ -3,18 +3,20 @@
 # Batch size is forced to 1 for consistent FPS measurement.
 #
 # Usage:
-#   bash eval_all_variants.sh                               # GPU, auto-discover checkpoints in outputs/
-#   bash eval_all_variants.sh /path/to/outputs              # GPU, custom output_dir
-#   bash eval_all_variants.sh /path/to/outputs --cpu        # CPU mode, custom output_dir
-#   USE_CPU=1 bash eval_all_variants.sh                     # CPU mode via env var
-#   MODEL_PATH=/path/to/best.pth bash eval_all_variants.sh  # explicit checkpoint for every variant
+#   bash eval_all_variants.sh                                        # GPU, all defaults
+#   bash eval_all_variants.sh <OUTPUT_DIR>                           # custom outputs dir
+#   bash eval_all_variants.sh <OUTPUT_DIR> <DATA_PATH>               # custom outputs + dataset path
+#   bash eval_all_variants.sh <OUTPUT_DIR> <DATA_PATH> --cpu         # CPU mode
+#   USE_CPU=1 bash eval_all_variants.sh                              # CPU mode via env var
+#   MODEL_PATH=/path/to/best.pth bash eval_all_variants.sh           # explicit checkpoint
 
 BATCH_SIZE=1
-OUTPUT_DIR="${1:-outputs}"   # First positional arg overrides output_dir; defaults to "outputs"
+OUTPUT_DIR="${1:-outputs}"
+DATA_PATH="${2:-/mnt/ssd-0/M2_internship/bdd100k_seg/bdd100k/seg}"
 
-# CPU mode: set USE_CPU=1 env var OR pass --cpu as second positional arg
+# CPU mode: set USE_CPU=1 env var OR pass --cpu as third positional arg
 USE_CPU=${USE_CPU:-0}
-if [ "${2}" = "--cpu" ]; then
+if [ "${3}" = "--cpu" ] || [ "${2}" = "--cpu" ]; then
     USE_CPU=1
 fi
 
@@ -25,8 +27,11 @@ else
 fi
 
 echo "========================================================"
-echo " KAN Variants Evaluation  |  BATCH_SIZE=${BATCH_SIZE}  |  DEVICE=${DEVICE_LABEL}"
-echo " OUTPUT_DIR=${OUTPUT_DIR}"
+echo " KAN Variants Evaluation"
+echo "   BATCH_SIZE : ${BATCH_SIZE}"
+echo "   OUTPUT_DIR : ${OUTPUT_DIR}"
+echo "   DATA_PATH  : ${DATA_PATH}"
+echo "   DEVICE     : ${DEVICE_LABEL}"
 echo "========================================================"
 mkdir -p "${OUTPUT_DIR}"
 
@@ -51,6 +56,7 @@ for KAN_TYPE in FasterKAN HardSwish PWLO ReLU TeLU; do
         python val.py \
             --name        "${NAME}"       \
             --output_dir  "${OUTPUT_DIR}" \
+            --data_path   "${DATA_PATH}"  \
             --batch_size  "${BATCH_SIZE}" \
             "${EXTRA_ARGS[@]}"            \
             > "${LOG_FILE}" 2>&1
@@ -58,6 +64,7 @@ for KAN_TYPE in FasterKAN HardSwish PWLO ReLU TeLU; do
         CUDA_VISIBLE_DEVICES=0 python val.py \
             --name        "${NAME}"       \
             --output_dir  "${OUTPUT_DIR}" \
+            --data_path   "${DATA_PATH}"  \
             --batch_size  "${BATCH_SIZE}" \
             "${EXTRA_ARGS[@]}"            \
             > "${LOG_FILE}" 2>&1

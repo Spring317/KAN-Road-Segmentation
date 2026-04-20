@@ -42,6 +42,16 @@ def parse_args():
     parser.add_argument("--name", default="bdd100k_UKAN", help="model name")
     parser.add_argument("--output_dir", default="outputs", help="ouput dir")
     parser.add_argument(
+        "--data_path",
+        default="/mnt/ssd-0/M2_internship/bdd100k_seg/bdd100k/seg",
+        help="Path to the BDD100K segmentation dataset root (the 'seg' directory)",
+    )
+    parser.add_argument(
+        "--model_path",
+        default=None,
+        help="Explicit path to checkpoint file. Overrides the default outputs/{name}/checkpoint_best.pth path.",
+    )
+    parser.add_argument(
         "--num_vis", default=10, type=int, help="number of images to visualize"
     )
     parser.add_argument(
@@ -173,7 +183,7 @@ def main():
         model = model.to(device)
 
     # BDD100K dataset paths
-    bdd100k_base = "/mnt/ssd-0/M2_internship/bdd100k_seg/bdd100k/seg"
+    bdd100k_base = args.data_path
 
     # Get image IDs from the BDD100K validation set - use masks as the source of truth
     val_mask_paths = sorted(glob(os.path.join(bdd100k_base, "labels", "val", "*.png")))
@@ -186,26 +196,35 @@ def main():
     print(f"Validation samples: {len(val_img_ids)}")
 
     if not args.yolo_exp:
-        # Load model weights
-        model_path = f"{args.output_dir}/{args.name}/checkpoint_best.pth"
+        # Load model weights — explicit path takes priority, then checkpoint_best.pth, then model_best.pth
+        if args.model_path:
+            model_path = args.model_path
+        else:
+            model_path = f"{args.output_dir}/{args.name}/checkpoint_best.pth"
+            if not os.path.exists(model_path):
+                model_path = f"{args.output_dir}/{args.name}/model_best.pth"
         print(f"Loading model from {model_path}")
-        ckpt = torch.load(model_path)
+        ckpt = torch.load(model_path, map_location=device)
+
+        # Support both raw state_dicts and full training checkpoints
+        # (full checkpoints contain model_state_dict, optimizer_state_dict, epoch, etc.)
+        if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+            print(f"  Full checkpoint detected (epoch {ckpt.get('epoch', '?')}, best_iou {ckpt.get('best_iou', '?'):.4f})")
+            ckpt = ckpt["model_state_dict"]
+
+        # Strip _orig_mod. prefix produced by torch.compile
+        ckpt = {k.replace("_orig_mod.", ""): v for k, v in ckpt.items()}
 
         try:
             model.load_state_dict(ckpt)
-        except:
-            print("Pretrained model keys:", ckpt.keys())
-            print("Current model keys:", model.state_dict().keys())
-
-            pretrained_dict = {k: v for k, v in ckpt.items() if k in model.state_dict()}
-            current_dict = model.state_dict()
-            diff_keys = set(current_dict.keys()) - set(pretrained_dict.keys())
-
-            print("Difference in model keys:")
-            for key in diff_keys:
-                print(f"Key: {key}")
-
-            model.load_state_dict(ckpt, strict=False)
+            print("Model loaded successfully.")
+        except Exception as e:
+            print(f"Strict load failed ({e}), trying strict=False...")
+            missing, unexpected = model.load_state_dict(ckpt, strict=False)
+            if missing:
+                print(f"  Missing keys  ({len(missing)}): {missing[:5]} ...")
+            if unexpected:
+                print(f"  Unexpected keys ({len(unexpected)}): {unexpected[:5]} ...")
 
         model.eval()
 

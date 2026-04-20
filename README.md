@@ -80,33 +80,44 @@ CUDA_VISIBLE_DEVICES=0 python train.py \
 
 ## Validation
 
+> [!IMPORTANT]
+> Validation requires access to the **BDD100K segmentation dataset**. Pass its path via `--data_path` (or the `DATA_PATH` positional arg in the batch script). The default value is the cluster path `/mnt/ssd-0/M2_internship/bdd100k_seg/bdd100k/seg`.
+
 ### Evaluate all trained variants at once
 
 ```bash
 conda activate ukan
 cd Seg_UKAN
 
-# Default — GPU, looks for checkpoints in Seg_UKAN/outputs/
+# Signature:
+#   bash eval_all_variants.sh [OUTPUT_DIR] [DATA_PATH] [--cpu]
+
+# 1. All defaults (cluster paths, GPU)
 bash eval_all_variants.sh
 
-# Custom output directory (e.g. on a cluster with a different mount point)
-bash eval_all_variants.sh /mnt/ssd-0/M2_internship/KAN-Road-Segmentation/Seg_UKAN/outputs
+# 2. Custom output dir, default data path
+bash eval_all_variants.sh /path/to/outputs
 
-# CPU mode — no GPU required (useful for machines without CUDA)
-bash eval_all_variants.sh outputs --cpu
+# 3. Custom output dir + custom dataset path (most common when running elsewhere)
+bash eval_all_variants.sh \
+    /path/to/outputs \
+    /path/to/bdd100k/seg
 
-# CPU mode with a custom output directory
-bash eval_all_variants.sh /path/to/outputs --cpu
+# 4. CPU mode (no GPU required)
+bash eval_all_variants.sh \
+    /path/to/outputs \
+    /path/to/bdd100k/seg \
+    --cpu
 
-# CPU mode via environment variable
+# 5. CPU mode via environment variable
 USE_CPU=1 bash eval_all_variants.sh
 
-# Provide an explicit checkpoint path (applied to every variant — for quick testing)
+# 6. Explicit checkpoint for every variant (quick testing)
 MODEL_PATH=/path/to/checkpoint_best.pth bash eval_all_variants.sh
 ```
 
-Evaluation logs are written to `<OUTPUT_DIR>/eval_<KAN_TYPE>.log`.  
-Metrics and visualisations are saved under `<OUTPUT_DIR>/bdd100k_<KAN_TYPE>/`.
+Evaluation logs → `<OUTPUT_DIR>/eval_<KAN_TYPE>.log`  
+Metrics & visualisations → `<OUTPUT_DIR>/bdd100k_<KAN_TYPE>/`
 
 ### Evaluate a single variant manually
 
@@ -114,33 +125,28 @@ Metrics and visualisations are saved under `<OUTPUT_DIR>/bdd100k_<KAN_TYPE>/`.
 conda activate ukan
 cd Seg_UKAN
 
-# GPU inference (default)
+# GPU (default)
 python val.py \
     --name       bdd100k_HardSwish \
-    --output_dir outputs            \
+    --output_dir /path/to/outputs  \
+    --data_path  /path/to/bdd100k/seg \
     --batch_size 1
 
-# CPU inference — no GPU required
+# CPU — no GPU required
 python val.py \
     --name       bdd100k_HardSwish \
-    --output_dir outputs            \
-    --batch_size 1                  \
+    --output_dir /path/to/outputs  \
+    --data_path  /path/to/bdd100k/seg \
+    --batch_size 1 \
     --cpu
 
-# Override the checkpoint path explicitly
+# Explicit checkpoint path
 python val.py \
-    --name       bdd100k_HardSwish \
-    --output_dir outputs            \
-    --batch_size 1                  \
-    --model_path outputs/bdd100k_HardSwish/model_best.pth
-
-# CPU + explicit checkpoint
-python val.py \
-    --name       bdd100k_HardSwish \
-    --output_dir outputs            \
-    --batch_size 1                  \
-    --cpu                           \
-    --model_path outputs/bdd100k_HardSwish/model_best.pth
+    --name        bdd100k_HardSwish \
+    --output_dir  /path/to/outputs  \
+    --data_path   /path/to/bdd100k/seg \
+    --model_path  /path/to/outputs/bdd100k_HardSwish/checkpoint_best.pth \
+    --batch_size  1
 ```
 
 #### `val.py` flags reference
@@ -148,12 +154,14 @@ python val.py \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--name` | `bdd100k_UKAN` | Experiment name (must match the training `--name`) |
-| `--output_dir` | `outputs` | Root directory containing experiment folders |
-| `--model_path` | *(auto)* | Explicit checkpoint path — overrides the auto-discovered `checkpoint_best.pth` / `model_best.pth` |
+| `--output_dir` | `outputs` | Root directory containing experiment output folders |
+| `--data_path` | *(cluster path)* | Path to the BDD100K `seg` directory (contains `images/` and `labels/`) |
+| `--model_path` | *(auto)* | Explicit checkpoint path — overrides auto-discovered `checkpoint_best.pth` / `model_best.pth` |
 | `--batch_size` | `1` | Batch size for the validation dataloader |
 | `--num_vis` | `10` | Number of sample images to visualise |
 | `--cpu` | `False` | Run on CPU instead of CUDA (no GPU required) |
 | `--yolo_exp` | `None` | Validate a YOLO experiment instead of a KAN model |
+
 
 ---
 
