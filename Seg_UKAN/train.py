@@ -97,7 +97,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--name", default=None, help="experiment name")
-    parser.add_argument("--model_name", default="UKAN", choices=["UKAN", "yolo"])
+    parser.add_argument("--model_name", default="UKAN", choices=["UKAN", "yolo", "yolo_kan"])
     parser.add_argument("--epochs", default=400, type=int)
     parser.add_argument("-b", "--batch_size", default=16, type=int)
     parser.add_argument("--dataseed", default=2981, type=int)
@@ -179,6 +179,9 @@ def parse_args():
     parser.add_argument(
         "--yolo_task", default="segment", choices=["detect", "segment", "pose", "obb"]
     )
+    # yolo_kan specific
+    parser.add_argument("--yolo_pretrained", default="yolov11m-seg.pt", help="Pretrained weights for YOLOKANSeg")
+    parser.add_argument("--yolo_freeze_backbone", default=False, type=str2bool)
     return vars(parser.parse_args())
 
 
@@ -227,6 +230,25 @@ def load_ukan_model(config) -> nn.Module:
         no_kan=config.get("no_kan", False),
         kan_type=config.get("kan_type", "FasterKAN"),
     )
+
+
+def load_yolokan_model(config, rank) -> nn.Module:
+    # Resolve YOLO weights path using existing helper
+    project_root = Path(__file__).resolve().parent
+    weights_path = resolve_yolo_weights(config.get("yolo_pretrained", "yolov11m-seg.pt"), project_root)
+    
+    model = archs.__dict__[config["arch"]](
+        num_classes=config["num_classes"],
+        kan_type=config.get("kan_type", "FasterKAN"),
+        no_kan=config.get("no_kan", False),
+        yolo_weights=weights_path,
+        freeze_backbone=config.get("yolo_freeze_backbone", False)
+    )
+    
+    if is_main_process(rank):
+        model.print_parameter_stats()
+        
+    return model
 
 
 def train_one_epoch(
@@ -449,7 +471,11 @@ def main():
     else:
         criterion = losses.__dict__[config["loss"]]().cuda()
 
-    model = load_ukan_model(config)
+    if config["model_name"].lower() == "yolo_kan":
+        model = load_yolokan_model(config, rank)
+    else:
+        model = load_ukan_model(config)
+        
     if distributed and config["sync_bn"]:
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = model.cuda()

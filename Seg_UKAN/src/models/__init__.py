@@ -5,5 +5,6 @@ Exposes ``UKAN`` and the ``__all__`` list used by
 """
 
 from src.models.ukan import UKAN
+from src.models.yolo_kan_seg import YOLOKANSeg
 
-__all__ = ["UKAN"]
+__all__ = ["UKAN", "YOLOKANSeg"]
