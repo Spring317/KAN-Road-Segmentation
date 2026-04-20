@@ -51,7 +51,7 @@ cd Seg_UKAN
 #   RESUME=False  → fresh start (overwrites existing checkpoints and logs)
 #   EPOCHS=200    → total target epochs
 
-bash run_variants_1gpu.sh
+bash scripts/run_variants_1gpu.sh
 ```
 
 Logs are written to `outputs/terminal_<KAN_TYPE>.log`.  
@@ -76,6 +76,17 @@ CUDA_VISIBLE_DEVICES=0 python train.py \
     --compile_model   True
 ```
 
+### Multi-GPU Distributed Training
+
+DDP is now natively integrated directly into `train.py`. You do not need a separate script — simply launch `train.py` using `torchrun`.
+
+```bash
+torchrun --nproc_per_node=4 train.py \
+    --name        bdd100k_HardSwish \
+    --kan_type    HardSwish \
+    --batch_size  4
+```
+
 ---
 
 ## Validation
@@ -90,30 +101,30 @@ conda activate ukan
 cd Seg_UKAN
 
 # Signature:
-#   bash eval_all_variants.sh [OUTPUT_DIR] [DATA_PATH] [--cpu]
+#   bash scripts/eval_all_variants.sh [OUTPUT_DIR] [DATA_PATH] [--cpu]
 
 # 1. All defaults (cluster paths, GPU)
-bash eval_all_variants.sh
+bash scripts/eval_all_variants.sh
 
 # 2. Custom output dir, default data path
-bash eval_all_variants.sh /path/to/outputs
+bash scripts/eval_all_variants.sh /path/to/outputs
 
 # 3. Custom output dir + custom dataset path (most common when running elsewhere)
-bash eval_all_variants.sh \
+bash scripts/eval_all_variants.sh \
     /path/to/outputs \
     /path/to/bdd100k/seg
 
 # 4. CPU mode (no GPU required)
-bash eval_all_variants.sh \
+bash scripts/eval_all_variants.sh \
     /path/to/outputs \
     /path/to/bdd100k/seg \
     --cpu
 
 # 5. CPU mode via environment variable
-USE_CPU=1 bash eval_all_variants.sh
+USE_CPU=1 bash scripts/eval_all_variants.sh
 
 # 6. Explicit checkpoint for every variant (quick testing)
-MODEL_PATH=/path/to/checkpoint_best.pth bash eval_all_variants.sh
+MODEL_PATH=/path/to/checkpoint_best.pth bash scripts/eval_all_variants.sh
 ```
 
 Evaluation logs → `<OUTPUT_DIR>/eval_<KAN_TYPE>.log`  
@@ -132,13 +143,17 @@ python val.py \
     --data_path  /path/to/bdd100k/seg \
     --batch_size 1
 
-# CPU — no GPU required
+# CPU — Proper Evaluation without thrashing resources
+# Locks exactly 4 cores for math operations and 2 for data loading
 python val.py \
-    --name       bdd100k_HardSwish \
-    --output_dir /path/to/outputs  \
-    --data_path  /path/to/bdd100k/seg \
-    --batch_size 1 \
-    --cpu
+    --name        bdd100k_HardSwish \
+    --output_dir  /path/to/outputs  \
+    --data_path   /path/to/bdd100k/seg \
+    --batch_size  1 \
+    --cpu \
+    --num_threads 4 \
+    --num_workers 2
+
 
 # Explicit checkpoint path
 python val.py \
