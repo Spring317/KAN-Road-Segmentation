@@ -660,7 +660,22 @@ def main():
                 weights_only=False,
             )
             _base = get_base_model(model, distributed)
-            _base.load_state_dict(ckpt["model_state_dict"])
+            
+            # Robust mapping for checkpoint keys (backwards compatibility for yolo -> yolo_wrapper.model renaming)
+            state_dict = ckpt["model_state_dict"]
+            updated_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                if "yolo." in k and "yolo_wrapper" not in k:
+                    k = k.replace("yolo.", "yolo_wrapper.model.")
+                updated_state_dict[k] = v
+                
+            try:
+                _base.load_state_dict(updated_state_dict, strict=True)
+            except RuntimeError as e:
+                if is_main_process(rank):
+                    print(f"[Resume] WARNING: strict loading failed, attempting non-strict. Error: {e}")
+                _base.load_state_dict(updated_state_dict, strict=False)
+                
             optimizer.load_state_dict(ckpt["optimizer_state_dict"])
             if ckpt.get("scaler_state_dict") is not None:
                 scaler.load_state_dict(ckpt["scaler_state_dict"])
