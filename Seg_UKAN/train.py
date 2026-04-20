@@ -143,6 +143,14 @@ def parse_args():
     parser.add_argument("--cfg", type=str, metavar="FILE")
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--resume", default=False, type=str2bool)
+    parser.add_argument(
+        "--checkpoint_path",
+        default="",
+        type=str,
+        help="Explicit path to a .pth checkpoint to resume from. "
+             "If empty and --resume True, auto-discovers "
+             "'checkpoint_last.pth' inside the experiment output dir.",
+    )
 
     # DDP/AMP
     parser.add_argument("--local_rank", type=int, default=-1)
@@ -603,13 +611,78 @@ def main():
             pct_start=0.1,
         )
 
+    start_epoch = 0
     best_iou = 0.0
     trigger = 0
     log = OrderedDict(
         epoch=[], lr=[], loss=[], iou=[], val_loss=[], val_iou=[], val_dice=[]
     )
 
-    for epoch in range(config["epochs"]):
+    # ── Resume from checkpoint ────────────────────────────────────────────────
+    if config["resume"]:
+        ckpt_path = (config.get("checkpoint_path") or "").strip() or os.path.join(
+            exp_dir, "checkpoint_last.pth"
+        )
+        if is_main_process(rank):
+            print(f"[Resume] Looking for checkpoint: {ckpt_path}")
+        if os.path.isfile(ckpt_path):
+            ckpt = torch.load(
+                ckpt_path,
+                map_location=f"cuda:{local_rank}",
+                weights_only=False,
+            )
+            _base = get_base_model(model, distributed)
+            _base.load_state_dict(ckpt["model_state_dict"])
+            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+            if ckpt.get("scaler_state_dict") is not None:
+                scaler.load_state_dict(ckpt["scaler_state_dict"])
+            start_epoch = int(ckpt["epoch"]) + 1
+            best_iou = float(ckpt.get("best_iou", 0.0))
+            # Reload existing CSV log (main process) so new rows are appended
+            if is_main_process(rank):
+                log_csv = os.path.join(exp_dir, "log.csv")
+                if os.path.isfile(log_csv):
+                    log = OrderedDict(pd.read_csv(log_csv).to_dict(orient="list"))
+                print(
+                    f"[Resume] Loaded '{ckpt_path}' "
+                    f"(saved epoch {ckpt['epoch']}) → "
+                    f"best_iou={best_iou:.4f}, "
+                    f"continuing from epoch {start_epoch}"
+                )
+            # Rebuild scheduler for remaining epochs (fresh cosine warm-restart)
+            remaining = config["epochs"] - start_epoch
+            if remaining > 0:
+                if config["scheduler"] == "CosineAnnealingLR":
+                    scheduler = lr_scheduler.CosineAnnealingLR(
+                        optimizer,
+                        T_max=remaining,
+                        eta_min=config["min_lr"],
+                    )
+                elif config["scheduler"] == "OneCycleLR":
+                    scheduler = lr_scheduler.OneCycleLR(
+                        optimizer,
+                        max_lr=config["lr"] * 10,
+                        epochs=remaining,
+                        steps_per_epoch=len(train_loader),
+                        pct_start=0.1,
+                    )
+                # ReduceLROnPlateau / MultiStepLR continue naturally as-is
+        else:
+            if is_main_process(rank):
+                print(
+                    f"[Resume] WARNING: checkpoint not found at '{ckpt_path}'. "
+                    "Starting from scratch."
+                )
+
+    # Broadcast start_epoch so all DDP ranks use the same value
+    if distributed:
+        _t = torch.tensor(
+            [start_epoch], dtype=torch.long, device=f"cuda:{local_rank}"
+        )
+        dist.broadcast(_t, src=0)
+        start_epoch = int(_t.item())
+
+    for epoch in range(start_epoch, config["epochs"]):
         if distributed and train_sampler is not None:
             train_sampler.set_epoch(epoch)
 
