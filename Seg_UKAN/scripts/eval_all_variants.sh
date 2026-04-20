@@ -10,7 +10,10 @@
 #   USE_CPU=1 bash eval_all_variants.sh                              # CPU mode via env var
 #   MODEL_PATH=/path/to/best.pth bash eval_all_variants.sh           # explicit checkpoint
 
-BATCH_SIZE=1
+BATCH_SIZE=${BATCH_SIZE:-1}
+NUM_THREADS=${NUM_THREADS:-0}
+NUM_WORKERS=${NUM_WORKERS:--1}
+
 OUTPUT_DIR="${1:-outputs}"
 DATA_PATH="${2:-/mnt/ssd-0/M2_internship/bdd100k_seg/bdd100k/seg}"
 
@@ -49,7 +52,7 @@ for KAN_TYPE in FasterKAN HardSwish PWLO ReLU TeLU; do
         EXTRA_ARGS+=(--model_path "${MODEL_PATH}")
     fi
     if [ "${USE_CPU}" = "1" ]; then
-        EXTRA_ARGS+=(--cpu)
+        EXTRA_ARGS+=(--cpu --num_threads "${NUM_THREADS}" --num_workers "${NUM_WORKERS}")
     fi
 
     if [ "${USE_CPU}" = "1" ]; then
