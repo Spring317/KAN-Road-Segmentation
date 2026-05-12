@@ -167,6 +167,7 @@ def parse_args():
     # DDP/AMP
     parser.add_argument("--local_rank", type=int, default=-1)
     parser.add_argument("--use_amp", default=True, type=str2bool)
+    parser.add_argument("--amp_dtype", default="float16", choices=["float16", "bfloat16"])
     parser.add_argument("--grad_accum_steps", default=1, type=int)
     parser.add_argument("--sync_bn", default=True, type=str2bool)
     parser.add_argument("--prefetch_factor", default=4, type=int)
@@ -278,7 +279,7 @@ def train_one_epoch(
         inp = inp.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
 
-        with amp.autocast("cuda", enabled=config["use_amp"]):
+        with amp.autocast("cuda", enabled=config["use_amp"], dtype=getattr(torch, config.get("amp_dtype", "float16"))):
             if config["deep_supervision"]:
                 outputs = model(inp)
                 loss = sum(criterion(output, target) for output in outputs) / len(
@@ -338,7 +339,7 @@ def validate(config, val_loader, model, criterion, rank, world_size):
             inp = inp.cuda(non_blocking=True)
             target = target.cuda(non_blocking=True)
 
-            with amp.autocast("cuda", enabled=config["use_amp"]):
+            with amp.autocast("cuda", enabled=config["use_amp"], dtype=getattr(torch, config.get("amp_dtype", "float16"))):
                 if config["deep_supervision"]:
                     outputs = model(inp)
                     loss = sum(criterion(output, target) for output in outputs) / len(
@@ -477,7 +478,31 @@ def main():
         model = load_yolokan_model(config, rank)
     else:
         model = load_ukan_model(config)
-        
+
+    # ── Print parameter statistics ────────────────────────────────────────
+    if is_main_process(rank):
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        non_trainable = total_params - trainable_params
+        print("\n" + "=" * 70)
+        print(f"  MODEL: {config['arch']}  |  no_kan={config.get('no_kan', False)}  |  kan_type={config.get('kan_type', 'N/A')}")
+        print("=" * 70)
+        print(f"  Total parameters      : {total_params:>12,}")
+        print(f"  Trainable parameters  : {trainable_params:>12,}")
+        print(f"  Non-trainable params  : {non_trainable:>12,}")
+        print("-" * 70)
+        print(f"  Estimated model size (FP32) : {total_params * 4 / 1024**2:>8.2f} MB")
+        print(f"  Estimated model size (FP16) : {total_params * 2 / 1024**2:>8.2f} MB")
+        print(f"  Estimated model size (INT8) : {total_params * 1 / 1024**2:>8.2f} MB")
+        print("-" * 70)
+        print(f"  {'Module':<40s} {'Params':>12s}  {'%':>6s}")
+        print("-" * 70)
+        for name, module in model.named_children():
+            mod_params = sum(p.numel() for p in module.parameters())
+            pct = 100.0 * mod_params / total_params if total_params > 0 else 0
+            print(f"  {name:<40s} {mod_params:>12,}  {pct:>5.1f}%")
+        print("=" * 70 + "\n")
+
     if distributed and config["sync_bn"]:
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = model.cuda()
@@ -525,7 +550,9 @@ def main():
             nesterov=config["nesterov"],
         )
 
-    scaler = amp.GradScaler("cuda", enabled=config["use_amp"])
+    # GradScaler is only needed for float16; bfloat16 has enough dynamic range
+    _use_scaler = config["use_amp"] and config.get("amp_dtype", "float16") == "float16"
+    scaler = amp.GradScaler("cuda", enabled=_use_scaler)
 
     if config["scheduler"] == "CosineAnnealingLR":
         scheduler = lr_scheduler.CosineAnnealingLR(

@@ -163,7 +163,7 @@ class BDD100KDataset(torch.utils.data.Dataset):
 
         mask_onehot = mask_to_onehot(mask, self.num_classes)  # (H, W, C)
 
-        img = img.astype("float32") / 255.0
+        img = img.astype("float32")
         img = img.transpose(2, 0, 1)          # (C, H, W)
         mask_onehot = mask_onehot.transpose(2, 0, 1)  # (C, H, W)
 
