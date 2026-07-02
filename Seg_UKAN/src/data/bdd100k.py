@@ -23,6 +23,10 @@ __all__ = [
     "BDD100K_COLOR_DICT",
     "BDD100K_NUM_CLASSES",
     "BDD100KDataset",
+    "IGNORE_INDEX",
+    "LABEL_GROUPINGS",
+    "LANE_FG_CLASSES",
+    "LANE_FG_COLOR_DICT",
 ]
 
 # ---------------------------------------------------------------------------
@@ -77,6 +81,44 @@ BDD100K_COLOR_DICT: dict[int, tuple] = {
 
 BDD100K_NUM_CLASSES: int = 20
 
+IGNORE_INDEX: int = 255
+
+
+# ---------------------------------------------------------------------------
+# Label groupings — pure remaps of the 20 seg classes (no new data needed).
+# ---------------------------------------------------------------------------
+
+def _make_label_map(src_to_dst, default, ignore_index=IGNORE_INDEX):
+    """256-entry lookup: original train_id -> grouped id. Unspecified ids fall
+    to `default`; the ignore index is preserved."""
+    arr = np.full(256, default, dtype=np.uint8)
+    for src, dst in src_to_dst.items():
+        arr[src] = dst
+    arr[ignore_index] = ignore_index
+    return arr
+
+
+# "lane_fg": binary road segmentation.
+#   0 lane(road) | non-lane -> background (1)
+LANE_FG_CLASSES = {0: "lane", 1: "background"}
+LANE_FG_COLOR_DICT = {
+    0: (1.0, 1.0, 0.0),  # lane       - yellow
+    1: (0.0, 0.0, 0.0),  # background - black
+}
+_LANE_FG_SRC = {
+    0: 0,  # road -> lane
+    # all others -> background (1)
+}
+
+LABEL_GROUPINGS = {
+    "lane_fg": {
+        "num_classes": 2,
+        "classes": LANE_FG_CLASSES,
+        "color_dict": LANE_FG_COLOR_DICT,
+        "label_map": _make_label_map(_LANE_FG_SRC, default=1),
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # Dataset
@@ -124,6 +166,7 @@ class BDD100KDataset(torch.utils.data.Dataset):
         transform=None,
         ignore_index: int = 19,
         mask_suffix: str = "",
+        label_map=None,
     ):
         self.img_ids = img_ids
         self.img_dir = img_dir
@@ -134,6 +177,7 @@ class BDD100KDataset(torch.utils.data.Dataset):
         self.transform = transform
         self.ignore_index = ignore_index
         self.mask_suffix = mask_suffix
+        self.label_map = label_map
 
     def __len__(self) -> int:
         return len(self.img_ids)
@@ -154,7 +198,11 @@ class BDD100KDataset(torch.utils.data.Dataset):
         if mask is None:
             raise FileNotFoundError(f"Mask not found: {mask_path}")
 
-        mask[mask == 255] = self.ignore_index
+        # Optional label grouping: remap original train_ids -> grouped ids.
+        if self.label_map is not None:
+            mask = self.label_map[mask]
+        else:
+            mask[mask == 255] = self.ignore_index
 
         if self.transform is not None:
             augmented = self.transform(image=img, mask=mask)

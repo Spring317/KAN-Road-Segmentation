@@ -29,7 +29,7 @@ import difflib
 
 import src.models as archs
 import src.training.losses as losses
-from src.data import BDD100KDataset, BDD100K_NUM_CLASSES
+from src.data import BDD100KDataset, BDD100K_NUM_CLASSES, LABEL_GROUPINGS
 from src.training.metrics import iou_score
 from src.utils.meters import AverageMeter
 from src.utils.seed import seed_torch
@@ -122,6 +122,13 @@ def parse_args():
     parser.add_argument("--output_dir", default="outputs")
     parser.add_argument(
         "--bdd100k_base", default="/mnt/ssd-0/M2_internship/bdd100k_seg/bdd100k/seg"
+    )
+    parser.add_argument(
+        "--label_grouping",
+        default="none",
+        choices=["none"] + list(LABEL_GROUPINGS),
+        help="Remap the 20 seg classes into a smaller grouped set. "
+             "'lane_fg' = road vs background (2 classes).",
     )
 
     # Optimizer
@@ -467,6 +474,16 @@ def main():
     if config["dataset"] == "bdd100k":
         config["num_classes"] = BDD100K_NUM_CLASSES
 
+    label_map = None
+    grouping = config.get("label_grouping", "none")
+    if grouping and grouping != "none":
+        g = LABEL_GROUPINGS[grouping]
+        config["num_classes"] = g["num_classes"]
+        label_map = g["label_map"]
+        if is_main_process(rank):
+            print(f"[Grouping] '{grouping}' -> {g['num_classes']} classes: "
+                  f"{list(g['classes'].values())}")
+
     writer = SummaryWriter(exp_dir) if is_main_process(rank) else None
 
     if config["loss"] == "BCEWithLogitsLoss":
@@ -608,9 +625,10 @@ def main():
         mask_dir=os.path.join(bdd, "labels", "train"),
         img_ext=".jpg",
         mask_ext=".png",
-        num_classes=BDD100K_NUM_CLASSES,
+        num_classes=config["num_classes"],
         transform=train_transform,
         mask_suffix="_train_id",
+        label_map=label_map,
     )
     val_dataset = BDD100KDataset(
         img_ids=val_img_ids,
@@ -618,9 +636,10 @@ def main():
         mask_dir=os.path.join(bdd, "labels", "val"),
         img_ext=".jpg",
         mask_ext=".png",
-        num_classes=BDD100K_NUM_CLASSES,
+        num_classes=config["num_classes"],
         transform=val_transform,
         mask_suffix="_train_id",
+        label_map=label_map,
     )
 
     train_sampler = (
