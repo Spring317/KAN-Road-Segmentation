@@ -121,7 +121,7 @@ def parse_args():
     parser.add_argument("--data_dir", default="inputs")
     parser.add_argument("--output_dir", default="outputs")
     parser.add_argument(
-        "--bdd100k_base", default="/mnt/ssd-0/M2_internship/bdd100k_seg/bdd100k/seg"
+        "--bdd100k_base", default="/storage/student11/bdd100k_seg/bdd100k/seg/"
     )
     parser.add_argument(
         "--label_grouping",
