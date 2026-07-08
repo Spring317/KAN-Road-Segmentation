@@ -25,19 +25,18 @@ echo " Started at: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "========================================================"
 mkdir -p outputs
 
-declare -a PIDS=()
-declare -a NAMES=()
-declare -a LOGS=()
-JOB_COUNT=0
+run_job() {
+  local KAN_TYPE=$1
+  local GPU_ID=$2
+  local LOG_FILE="outputs/terminal_lane_fg_${KAN_TYPE}.log"
 
-for KAN_TYPE in FasterKAN ReLU HardSwish PWLO TeLU; do
-  LOG_FILE="outputs/terminal_lane_fg_${KAN_TYPE}.log"
-
-  COMMON_ARGS=(
+  local COMMON_ARGS=(
     --name "bdd100k_lane_fg_${KAN_TYPE}"
     --model_name UKAN
     --kan_type "$KAN_TYPE"
     --label_grouping lane_fg
+    --input_w 640
+    --input_h 360
     --batch_size "$BATCH_SIZE"
     --grad_accum_steps "$GRAD_ACCUM"
     --use_amp True
@@ -47,50 +46,48 @@ for KAN_TYPE in FasterKAN ReLU HardSwish PWLO TeLU; do
     --compile_model True
   )
 
+  echo " [$(date '+%H:%M:%S')] Launched ${KAN_TYPE}-KAN (lane_fg) on GPU ${GPU_ID}  |  log: ${LOG_FILE}"
+
   if [ "$RESUME" = "True" ]; then
-    # Append to existing log so terminal history is continuous
-    CUDA_VISIBLE_DEVICES=0 python train.py "${COMMON_ARGS[@]}" >>"$LOG_FILE" 2>&1 &
+    CUDA_VISIBLE_DEVICES=$GPU_ID python train.py "${COMMON_ARGS[@]}" >>"$LOG_FILE" 2>&1
   else
-    # Fresh start – overwrite log
-    CUDA_VISIBLE_DEVICES=0 python train.py "${COMMON_ARGS[@]}" >"$LOG_FILE" 2>&1 &
+    CUDA_VISIBLE_DEVICES=$GPU_ID python train.py "${COMMON_ARGS[@]}" >"$LOG_FILE" 2>&1
   fi
+  
+  local EXIT_CODE=$?
+  if [ $EXIT_CODE -eq 0 ]; then
+    echo " [$(date '+%H:%M:%S')] ✓ ${KAN_TYPE}-KAN (lane_fg) finished successfully on GPU ${GPU_ID}"
+  else
+    echo " [$(date '+%H:%M:%S')] ✗ ${KAN_TYPE}-KAN (lane_fg) FAILED on GPU ${GPU_ID} with exit code ${EXIT_CODE}"
+    echo "   └─ Check log: ${LOG_FILE}"
+  fi
+}
 
-  PID=$!
-  PIDS+=("$PID")
-  NAMES+=("$KAN_TYPE")
-  LOGS+=("$LOG_FILE")
-  JOB_COUNT=$((JOB_COUNT + 1))
-
-  echo " [${JOB_COUNT}] Launched ${KAN_TYPE}-KAN (lane_fg)  |  PID: ${PID}  |  log: ${LOG_FILE}"
-done
-
-echo ""
-echo "========================================================"
-echo " ${JOB_COUNT} jobs launched at $(date '+%H:%M:%S'). Waiting for completion…"
-echo "========================================================"
-echo ""
 echo " Monitor tips:"
 echo "   tail -f outputs/terminal_lane_fg_FasterKAN.log   # follow one job"
 echo "   tail -n5 outputs/terminal_lane_fg_*.log          # check all latest"
 echo ""
 
-# Wait for all jobs and report results
-FAILED=0
-for i in "${!PIDS[@]}"; do
-  wait "${PIDS[$i]}"
-  EXIT_CODE=$?
-  TIMESTAMP=$(date '+%H:%M:%S')
-  if [ $EXIT_CODE -eq 0 ]; then
-    echo " [${TIMESTAMP}] ✓ ${NAMES[$i]}-KAN (lane_fg) finished successfully  (PID ${PIDS[$i]})"
-  else
-    echo " [${TIMESTAMP}] ✗ ${NAMES[$i]}-KAN (lane_fg) FAILED with exit code ${EXIT_CODE}  (PID ${PIDS[$i]})"
-    echo "   └─ Check log: ${LOGS[$i]}"
-    FAILED=$((FAILED + 1))
-  fi
-done
+# Queue for GPU 0
+(
+  run_job "FasterKAN" 0
+  run_job "HardSwish" 0
+  run_job "TeLU" 0
+) &
+PID0=$!
+
+# Queue for GPU 1
+(
+  run_job "ReLU" 1
+  run_job "PWLO" 1
+) &
+PID1=$!
+
+# Wait for both GPU queues to finish
+wait $PID0
+wait $PID1
 
 echo ""
 echo "========================================================"
-echo " All ${JOB_COUNT} lane_fg experiments finished at $(date '+%Y-%m-%d %H:%M:%S')"
-echo " Results: $((JOB_COUNT - FAILED)) succeeded, ${FAILED} failed"
+echo " All lane_fg experiments finished at $(date '+%Y-%m-%d %H:%M:%S')"
 echo "========================================================"

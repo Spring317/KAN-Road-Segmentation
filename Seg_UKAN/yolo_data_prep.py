@@ -28,11 +28,13 @@ class BDD100KYOLOPreparer:
         num_classes: int,
         rebuild_labels: bool = False,
         ignore_index: Optional[int] = None,
+        label_map: Optional[np.ndarray] = None,
     ):
         self.bdd_base = Path(bdd100k_base).resolve()
         self.num_classes = num_classes
         self.rebuild_labels = rebuild_labels
         self.ignore_index = num_classes - 1 if ignore_index is None else ignore_index
+        self.label_map = label_map
 
     def prepare(self, exp_dir: str) -> str:
         """Convert masks and write YAML.  Returns path to the YAML file."""
@@ -125,7 +127,10 @@ class BDD100KYOLOPreparer:
     def _mask_to_yolo_segments(self, mask: np.ndarray) -> List[str]:
         h, w = mask.shape
         mask = mask.copy()
-        mask[mask == 255] = self.ignore_index
+        if getattr(self, 'label_map', None) is not None:
+            mask = self.label_map[mask]
+        else:
+            mask[mask == 255] = self.ignore_index
 
         lines: List[str] = []
         for cls_id in range(self.num_classes):

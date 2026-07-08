@@ -30,7 +30,7 @@ import difflib
 import src.models as archs
 import src.training.losses as losses
 from src.data import BDD100KDataset, BDD100K_NUM_CLASSES, LABEL_GROUPINGS
-from src.training.metrics import iou_score
+from src.training.metrics import iou_score, SegmentationMetric
 from src.utils.meters import AverageMeter
 from src.utils.seed import seed_torch
 
@@ -114,7 +114,7 @@ def parse_args():
     parser.add_argument("--kan_type", default="FasterKAN", choices=["FasterKAN", "ReLU", "HardSwish", "PWLO", "TeLU"])
 
     # Loss
-    parser.add_argument("--loss", default="BCEDiceLoss", choices=LOSS_NAMES)
+    parser.add_argument("--loss", default="CrossEntropyDiceLoss", choices=LOSS_NAMES)
 
     # Dataset
     parser.add_argument("--dataset", default="bdd100k")
@@ -273,7 +273,8 @@ def train_one_epoch(
     world_size,
     scheduler=None,
 ):
-    avg_meters = {"loss": AverageMeter(), "iou": AverageMeter()}
+    avg_meters = {"loss": AverageMeter()}
+    seg_metric = SegmentationMetric(config["num_classes"])
     model.train()
     pbar = (
         tqdm(total=len(train_loader), desc=f"Epoch {epoch}")
@@ -292,15 +293,15 @@ def train_one_epoch(
                 loss = sum(criterion(output, target) for output in outputs) / len(
                     outputs
                 )
-                iou, _, _ = iou_score(outputs[-1], target)
+                output = outputs[-1]
             else:
                 output = model(inp)
                 loss = criterion(output, target)
-                iou, _, _ = iou_score(output, target)
 
             loss = loss / config["grad_accum_steps"]
 
         scaler.scale(loss).backward()
+        seg_metric.update(output.detach(), target)
 
         if (batch_idx + 1) % config["grad_accum_steps"] == 0:
             scaler.step(optimizer)
@@ -312,16 +313,16 @@ def train_one_epoch(
         loss_reduced = reduce_tensor(
             loss.detach() * config["grad_accum_steps"], world_size
         )
-        iou_reduced = reduce_tensor(torch.tensor(iou, device=inp.device), world_size)
 
         avg_meters["loss"].update(loss_reduced.item(), inp.size(0))
-        avg_meters["iou"].update(iou_reduced.item(), inp.size(0))
 
         if pbar is not None:
+            running_iou, _, per_class = seg_metric.compute()
             pbar.set_postfix(
                 OrderedDict(
                     loss=f"{avg_meters['loss'].avg:.4f}",
-                    iou=f"{avg_meters['iou'].avg:.4f}",
+                    iou=f"{running_iou:.4f}",
+                    iou_0=f"{per_class[0]:.4f}",
                 )
             )
             pbar.update(1)
@@ -329,11 +330,15 @@ def train_one_epoch(
     if pbar is not None:
         pbar.close()
 
-    return OrderedDict(loss=avg_meters["loss"].avg, iou=avg_meters["iou"].avg)
+    seg_metric.all_reduce()
+    miou, _, per_class = seg_metric.compute()
+
+    return OrderedDict(loss=avg_meters["loss"].avg, iou=miou, iou_0=per_class[0])
 
 
 def validate(config, val_loader, model, criterion, rank, world_size):
-    avg_meters = {"loss": AverageMeter(), "iou": AverageMeter(), "dice": AverageMeter()}
+    avg_meters = {"loss": AverageMeter()}
+    seg_metric = SegmentationMetric(config["num_classes"])
     model.eval()
     pbar = (
         tqdm(total=len(val_loader), desc="Validation")
@@ -352,30 +357,24 @@ def validate(config, val_loader, model, criterion, rank, world_size):
                     loss = sum(criterion(output, target) for output in outputs) / len(
                         outputs
                     )
-                    iou, dice, _ = iou_score(outputs[-1], target)
+                    output = outputs[-1]
                 else:
                     output = model(inp)
                     loss = criterion(output, target)
-                    iou, dice, _ = iou_score(output, target)
 
             loss_reduced = reduce_tensor(loss.detach(), world_size)
-            iou_reduced = reduce_tensor(
-                torch.tensor(iou, device=inp.device), world_size
-            )
-            dice_reduced = reduce_tensor(
-                torch.tensor(dice, device=inp.device), world_size
-            )
 
             avg_meters["loss"].update(loss_reduced.item(), inp.size(0))
-            avg_meters["iou"].update(iou_reduced.item(), inp.size(0))
-            avg_meters["dice"].update(dice_reduced.item(), inp.size(0))
+            seg_metric.update(output.detach(), target)
 
             if pbar is not None:
+                running_iou, running_dice, per_class = seg_metric.compute()
                 pbar.set_postfix(
                     OrderedDict(
                         loss=f"{avg_meters['loss'].avg:.4f}",
-                        iou=f"{avg_meters['iou'].avg:.4f}",
-                        dice=f"{avg_meters['dice'].avg:.4f}",
+                        iou=f"{running_iou:.4f}",
+                        iou_0=f"{per_class[0]:.4f}",
+                        dice=f"{running_dice:.4f}",
                     )
                 )
                 pbar.update(1)
@@ -383,10 +382,14 @@ def validate(config, val_loader, model, criterion, rank, world_size):
     if pbar is not None:
         pbar.close()
 
+    seg_metric.all_reduce()
+    miou, mdice, per_class = seg_metric.compute()
+
     return OrderedDict(
         loss=avg_meters["loss"].avg,
-        iou=avg_meters["iou"].avg,
-        dice=avg_meters["dice"].avg,
+        iou=miou,
+        dice=mdice,
+        iou_0=per_class[0],
     )
 
 
@@ -413,7 +416,7 @@ def make_bdd100k_yolo_yaml(config, exp_dir):
     return str(yolo_yaml)
 
 
-def run_yolo_training(config, exp_dir):
+def run_yolo_training(config, exp_dir, label_map=None):
     project_root = Path(__file__).resolve().parent
     weights = resolve_yolo_weights(config["yolo_weights"], project_root)
     model = YOLO(weights)
@@ -425,6 +428,7 @@ def run_yolo_training(config, exp_dir):
             num_classes=config["num_classes"],
             rebuild_labels=config["yolo_rebuild_labels"],
             ignore_index=config["num_classes"] - 1,
+            label_map=label_map,
         )
         data_yaml = preparer.prepare(exp_dir)
 
@@ -459,18 +463,6 @@ def main():
         with open(os.path.join(exp_dir, "config.yml"), "w") as f:
             yaml.safe_dump(config, f)
 
-    # --- YOLO branch ---
-    if config["model_name"].lower() == "yolo":
-        if distributed:
-            if is_main_process(rank):
-                print("YOLO branch must be run without torchrun in this script.")
-            cleanup_distributed()
-            return
-        run_yolo_training(config, exp_dir)
-        cleanup_distributed()
-        return
-
-    # --- UKAN branch ---
     if config["dataset"] == "bdd100k":
         config["num_classes"] = BDD100K_NUM_CLASSES
 
@@ -483,6 +475,19 @@ def main():
         if is_main_process(rank):
             print(f"[Grouping] '{grouping}' -> {g['num_classes']} classes: "
                   f"{list(g['classes'].values())}")
+
+    # --- YOLO branch ---
+    if config["model_name"].lower() == "yolo":
+        if distributed:
+            if is_main_process(rank):
+                print("YOLO branch must be run without torchrun in this script.")
+            cleanup_distributed()
+            return
+        run_yolo_training(config, exp_dir, label_map=label_map)
+        cleanup_distributed()
+        return
+
+    # --- UKAN branch ---
 
     writer = SummaryWriter(exp_dir) if is_main_process(rank) else None
 
@@ -689,7 +694,7 @@ def main():
     best_iou = 0.0
     trigger = 0
     log = OrderedDict(
-        epoch=[], lr=[], loss=[], iou=[], val_loss=[], val_iou=[], val_dice=[]
+        epoch=[], lr=[], loss=[], iou=[], train_iou_0=[], val_loss=[], val_iou=[], val_dice=[], val_iou_0=[]
     )
 
     # ── Resume from checkpoint ────────────────────────────────────────────────
@@ -802,17 +807,21 @@ def main():
             log["lr"].append(lr_now)
             log["loss"].append(train_log["loss"])
             log["iou"].append(train_log["iou"])
+            log["train_iou_0"].append(train_log["iou_0"])
             log["val_loss"].append(val_log["loss"])
             log["val_iou"].append(val_log["iou"])
             log["val_dice"].append(val_log["dice"])
+            log["val_iou_0"].append(val_log["iou_0"])
             pd.DataFrame(log).to_csv(os.path.join(exp_dir, "log.csv"), index=False)
 
             if writer is not None:
                 writer.add_scalar("train/loss", train_log["loss"], epoch)
                 writer.add_scalar("train/iou", train_log["iou"], epoch)
+                writer.add_scalar("train/iou_0", train_log["iou_0"], epoch)
                 writer.add_scalar("val/loss", val_log["loss"], epoch)
                 writer.add_scalar("val/iou", val_log["iou"], epoch)
                 writer.add_scalar("val/dice", val_log["dice"], epoch)
+                writer.add_scalar("val/iou_0", val_log["iou_0"], epoch)
                 writer.add_scalar("lr", lr_now, epoch)
 
             base_model = get_base_model(model, distributed)

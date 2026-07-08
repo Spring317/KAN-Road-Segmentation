@@ -9,7 +9,7 @@ try:
 except ImportError:
     lovasz_hinge = None  # type: ignore
 
-__all__ = ["BCEDiceLoss", "LovaszHingeLoss"]
+__all__ = ["BCEDiceLoss", "LovaszHingeLoss", "CrossEntropyDiceLoss", "FocalLoss"]
 
 
 class BCEDiceLoss(nn.Module):
@@ -41,3 +41,99 @@ class LovaszHingeLoss(nn.Module):
                 "Run: pip install git+https://github.com/bermanmaxim/LovaszSoftmax"
             )
         return lovasz_hinge(input.squeeze(1), target.squeeze(1), per_image=True)
+
+class CrossEntropyDiceLoss(nn.Module):
+    """Combined CrossEntropy + Dice loss for multi-class semantic segmentation.
+
+    Works with raw logits (B, C, H, W) and class-index targets (B, H, W).
+    Properly ignores pixels with *ignore_index* in both loss terms.
+    """
+
+    def __init__(self, ignore_index=255, dice_weight=1.0, ce_weight=1.0,
+                 class_weights=None):
+        super().__init__()
+        self.ignore_index = ignore_index
+        self.dice_weight = dice_weight
+        self.ce_weight = ce_weight
+        # class_weights: 1-D tensor (len = num_classes) up-weighting rare
+        # classes in the CE term to counteract pixel-count imbalance.
+        # Registered as a buffer via nn.CrossEntropyLoss(weight=...), so
+        # .cuda() on this module moves it to GPU automatically.
+        self.ce = nn.CrossEntropyLoss(
+            ignore_index=ignore_index, weight=class_weights
+        )
+
+    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        input  : (B, C, H, W) raw logits
+        target : (B, H, W) class indices, 255 = ignore
+        """
+        # --- Cross-Entropy term ---
+        ce_loss = self.ce(input, target)
+
+        # --- Dice term (per-class, ignoring ignore_index) ---
+        num_classes = input.shape[1]
+        smooth = 1e-5
+
+        # Build valid mask and clamp target for one-hot scatter
+        valid = (target != self.ignore_index)          # (B, H, W)
+        target_clamped = target.clone()
+        target_clamped[~valid] = 0                     # safe index for scatter
+
+        # Probabilities: (B, C, H, W)
+        probs = F.softmax(input, dim=1)
+
+        # One-hot encode target: (B, C, H, W)
+        target_oh = torch.zeros_like(probs)
+        target_oh.scatter_(1, target_clamped.unsqueeze(1), 1.0)
+
+        # Zero-out ignored pixels in both predictions and targets
+        valid_mask = valid.unsqueeze(1).float()        # (B, 1, H, W)
+        probs = probs * valid_mask
+        target_oh = target_oh * valid_mask
+
+        # Per-class Dice
+        dims = (0, 2, 3)  # reduce over batch, H, W
+        intersection = (probs * target_oh).sum(dim=dims)
+        cardinality = probs.sum(dim=dims) + target_oh.sum(dim=dims)
+
+        dice_per_class = (2.0 * intersection + smooth) / (cardinality + smooth)
+
+        # Only average over classes actually present in the target OR heavily predicted —
+        # absent classes produce near-1.0 Dice that dilutes the signal, but we must
+        # not ignore massive false positives.
+        present = (target_oh.sum(dim=(0, 2, 3)) > 0) | (probs.sum(dim=(0, 2, 3)) > 1.0)
+        if present.any():
+            dice_loss = 1.0 - dice_per_class[present].mean()
+        else:
+            dice_loss = torch.tensor(0.0, device=input.device)
+
+        return self.ce_weight * ce_loss + self.dice_weight * dice_loss
+
+
+class FocalLoss(nn.Module):
+    """Focal Loss for multi-class semantic segmentation.
+
+    Reduces the contribution of easy-to-classify pixels so the model
+    focuses on hard examples.
+    """
+
+    def __init__(self, alpha=1.0, gamma=2.0, ignore_index=255):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.ignore_index = ignore_index
+
+    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        ce = F.cross_entropy(
+            input, target, reduction="none", ignore_index=self.ignore_index
+        )
+        pt = torch.exp(-ce)
+        focal = self.alpha * (1 - pt) ** self.gamma * ce
+
+        valid = target != self.ignore_index
+        return focal[valid].mean()
+
+
