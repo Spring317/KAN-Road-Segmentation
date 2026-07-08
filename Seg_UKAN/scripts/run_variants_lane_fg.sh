@@ -11,8 +11,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-BATCH_SIZE=4
-GRAD_ACCUM=4
+BATCH_SIZE=16
+GRAD_ACCUM=1
 EPOCHS=200
 
 # ← Set to True to continue from the last checkpoint of each experiment,
