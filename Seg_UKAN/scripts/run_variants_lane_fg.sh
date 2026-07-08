@@ -36,7 +36,7 @@ run_job() {
     --kan_type "$KAN_TYPE"
     --label_grouping lane_fg
     --input_w 640
-    --input_h 360
+    --input_h 384
     --batch_size "$BATCH_SIZE"
     --grad_accum_steps "$GRAD_ACCUM"
     --use_amp True
